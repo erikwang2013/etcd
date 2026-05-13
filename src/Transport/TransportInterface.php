@@ -8,5 +8,9 @@ interface TransportInterface
 {
     public function send(string $path, array $body): array;
 
-    public function watch(string $key, string $rangeEnd, int $startRevision, callable $onEvent): void;
+    /**
+     * @param callable $onEvent  function(array $events): void
+     * @param array    $options  'prevKv' => bool, 'progressNotify' => bool
+     */
+    public function watch(string $key, string $rangeEnd, int $startRevision, callable $onEvent, array $options = []): void;
 }

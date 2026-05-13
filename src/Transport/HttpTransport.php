@@ -109,7 +109,7 @@ class HttpTransport implements TransportInterface
         );
     }
 
-    public function watch(string $key, string $rangeEnd, int $startRevision, callable $onEvent): void
+    public function watch(string $key, string $rangeEnd, int $startRevision, callable $onEvent, array $options = []): void
     {
         $endpoint = $this->pickEndpoint();
         $url = "http://{$endpoint}/v3/watch";
@@ -122,6 +122,12 @@ class HttpTransport implements TransportInterface
         }
         if ($startRevision > 0) {
             $createRequest['start_revision'] = $startRevision;
+        }
+        if (!empty($options['prevKv'])) {
+            $createRequest['prev_kv'] = true;
+        }
+        if (!empty($options['progressNotify'])) {
+            $createRequest['progress_notify'] = true;
         }
 
         $body = json_encode(['create_request' => $createRequest], JSON_THROW_ON_ERROR);
@@ -201,7 +207,19 @@ class HttpTransport implements TransportInterface
                     $d = base64_decode($kv['value'], true);
                     $kv['value'] = $d !== false ? $d : $kv['value'];
                 }
-                $events[] = ['type' => $type, 'kv' => $kv];
+                $prevKv = null;
+                if (isset($event['prev_kv'])) {
+                    $prevKv = $event['prev_kv'];
+                    if (isset($prevKv['key'])) {
+                        $d = base64_decode($prevKv['key'], true);
+                        $prevKv['key'] = $d !== false ? $d : $prevKv['key'];
+                    }
+                    if (isset($prevKv['value'])) {
+                        $d = base64_decode($prevKv['value'], true);
+                        $prevKv['value'] = $d !== false ? $d : $prevKv['value'];
+                    }
+                }
+                $events[] = ['type' => $type, 'kv' => $kv, 'prev_kv' => $prevKv];
             }
 
             if (!empty($events)) {

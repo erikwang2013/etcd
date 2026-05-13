@@ -31,7 +31,14 @@ class WatchClient
     {
         $rangeEnd = $options['rangeEnd'] ?? '';
         $startRevision = $options['startRevision'] ?? 0;
-        $this->transport->watch($key, $rangeEnd, $startRevision, $onEvent);
+        $watchOpts = [];
+        if (!empty($options['prevKv'])) {
+            $watchOpts['prevKv'] = true;
+        }
+        if (!empty($options['progressNotify'])) {
+            $watchOpts['progressNotify'] = true;
+        }
+        $this->transport->watch($key, $rangeEnd, $startRevision, $onEvent, $watchOpts);
     }
 
     /**

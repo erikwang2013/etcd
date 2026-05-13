@@ -105,6 +105,21 @@ class KvClient
     }
 
     /**
+     * Get a single key or throw KeyNotFoundException if not found.
+     *
+     * @throws \Erikwang2013\Etcd\Exception\KeyNotFoundException
+     * @return array  Decoded KV: ['key' => ..., 'value' => ..., 'create_revision' => ..., 'mod_revision' => ..., 'version' => ..., 'lease' => ...]
+     */
+    public function getOrFail(string $key, array $options = []): array
+    {
+        $result = $this->get($key, $options);
+        if (empty($result['kvs'])) {
+            throw new \Erikwang2013\Etcd\Exception\KeyNotFoundException("Key not found: {$key}");
+        }
+        return $result['kvs'][0];
+    }
+
+    /**
      * Delete a key or range of keys.
      *
      * @param array $options Optional: 'rangeEnd' => string, 'prevKv' => bool

@@ -24,7 +24,7 @@ class GrpcTransport implements TransportInterface
         throw new ConnectionException('gRPC transport send() not yet implemented. Use HTTP transport or implement gRPC service stubs.');
     }
 
-    public function watch(string $key, string $rangeEnd, int $startRevision, callable $onEvent): void
+    public function watch(string $key, string $rangeEnd, int $startRevision, callable $onEvent, array $options = []): void
     {
         throw new ConnectionException('gRPC transport watch() not yet implemented. Use HTTP transport.');
     }

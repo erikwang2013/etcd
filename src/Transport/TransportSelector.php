@@ -13,7 +13,7 @@ class TransportSelector
      */
     public static function select(array $config): TransportInterface
     {
-        $transport = $config['transport'] ?? 'http';
+        $transport = $config['transport'] ?? 'auto';
         $endpoints = $config['endpoints'] ?? ['127.0.0.1:2379'];
 
         if (empty($endpoints)) {
@@ -28,7 +28,7 @@ class TransportSelector
             return new HttpTransport($endpoints, $config);
         }
 
-        if (extension_loaded('grpc')) {
+        if (extension_loaded('grpc') && class_exists('Grpc\BaseStub')) {
             return new GrpcTransport($endpoints, $config);
         }
 
