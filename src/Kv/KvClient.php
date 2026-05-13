@@ -248,8 +248,8 @@ class KvClient
     private function decodeKv(array $kv): array
     {
         return [
-            'key'              => \base64_decode($kv['key'] ?? '', true) ?: ($kv['key'] ?? ''),
-            'value'            => \array_key_exists('value', $kv) ? (\base64_decode($kv['value'], true) ?: $kv['value']) : null,
+            'key'              => ($d = \base64_decode($kv['key'] ?? '', true)) !== false ? $d : ($kv['key'] ?? ''),
+            'value'            => \array_key_exists('value', $kv) ? (($d = \base64_decode($kv['value'], true)) !== false ? $d : $kv['value']) : null,
             'create_revision'  => (int) ($kv['create_revision'] ?? 0),
             'mod_revision'     => (int) ($kv['mod_revision'] ?? 0),
             'version'          => (int) ($kv['version'] ?? 0),

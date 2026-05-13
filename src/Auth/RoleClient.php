@@ -28,8 +28,8 @@ class RoleClient
         foreach ($response['perm'] ?? [] as $p) {
             $perms[] = [
                 'permType'  => (int) ($p['permType'] ?? 0),
-                'key'       => \base64_decode($p['key'] ?? '', true) ?: ($p['key'] ?? ''),
-                'range_end' => \base64_decode($p['range_end'] ?? '', true) ?: ($p['range_end'] ?? ''),
+                'key'       => ($d = \base64_decode($p['key'] ?? '', true)) !== false ? $d : ($p['key'] ?? ''),
+                'range_end' => ($d = \base64_decode($p['range_end'] ?? '', true)) !== false ? $d : ($p['range_end'] ?? ''),
             ];
         }
         return [

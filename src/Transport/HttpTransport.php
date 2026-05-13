@@ -194,10 +194,12 @@ class HttpTransport implements TransportInterface
                 }
                 $kv = $event['kv'] ?? [];
                 if (isset($kv['key'])) {
-                    $kv['key'] = \base64_decode($kv['key'], true) ?: $kv['key'];
+                    $d = \base64_decode($kv['key'], true);
+                    $kv['key'] = $d !== false ? $d : $kv['key'];
                 }
                 if (isset($kv['value'])) {
-                    $kv['value'] = \base64_decode($kv['value'], true) ?: $kv['value'];
+                    $d = \base64_decode($kv['value'], true);
+                    $kv['value'] = $d !== false ? $d : $kv['value'];
                 }
                 $events[] = ['type' => $type, 'kv' => $kv];
             }
