@@ -1,0 +1,30 @@
+{
+    "name": "erikwang2013/etcd",
+    "description": "PHP etcd v3 client with gRPC + HTTP dual transport. Supports Laravel, Hyperf, ThinkPHP, Webman.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["etcd", "etcd-client", "etcd-v3", "laravel", "hyperf", "thinkphp", "webman"],
+    "require": {
+        "php": ">=8.1",
+        "psr/http-client": "^1.0",
+        "psr/http-factory": "^1.0"
+    },
+    "suggest": {
+        "grpc/grpc": "For native gRPC transport (better performance, full watch streaming)",
+        "google/protobuf": "For protobuf message support (required by gRPC transport)"
+    },
+    "autoload": {
+        "psr-4": {
+            "Erikwang2013\\Etcd\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": ["Erikwang2013\\Etcd\\Adapter\\Laravel\\ServiceProvider"],
+            "aliases": {"Etcd": "Erikwang2013\\Etcd\\Adapter\\Laravel\\Facade"}
+        },
+        "hyperf": {
+            "config": "Erikwang2013\\Etcd\\Adapter\\Hyperf\\ConfigProvider"
+        }
+    }
+}
