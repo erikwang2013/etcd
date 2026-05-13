@@ -74,7 +74,7 @@ class LeaseClient
         ]);
         $decodedKeys = [];
         foreach ($response['keys'] ?? [] as $k) {
-            $d = \base64_decode($k, true);
+            $d = base64_decode($k, true);
             $decodedKeys[] = $d !== false ? $d : $k;
         }
         return [

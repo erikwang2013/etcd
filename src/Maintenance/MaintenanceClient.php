@@ -96,23 +96,23 @@ class MaintenanceClient
     public function snapshot(): string
     {
         $endpoints = $this->config['endpoints'] ?? ['127.0.0.1:2379'];
-        $endpoint = $endpoints[\array_rand($endpoints)];
+        $endpoint = $endpoints[array_rand($endpoints)];
         $url = "http://{$endpoint}/v3/maintenance/snapshot";
 
-        $ch = \curl_init($url);
-        \curl_setopt($ch, CURLOPT_POST, true);
-        \curl_setopt($ch, CURLOPT_POSTFIELDS, '{}');
-        \curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        \curl_setopt($ch, CURLOPT_TIMEOUT, 300);
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_POST, true);
+        curl_setopt($ch, CURLOPT_POSTFIELDS, '{}');
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 300);
 
         if (!empty($this->config['auth']['user'])) {
-            $credentials = \base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
-            \curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Basic ' . $credentials]);
+            $credentials = base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Basic ' . $credentials]);
         }
 
-        $data = \curl_exec($ch);
-        $httpCode = \curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        \curl_close($ch);
+        $data = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
 
         if ($httpCode !== 200) {
             throw new EtcdException("Snapshot failed with HTTP {$httpCode}");

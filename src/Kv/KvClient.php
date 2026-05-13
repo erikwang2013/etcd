@@ -24,8 +24,8 @@ class KvClient
     public function put(string $key, string $value, array $options = []): array
     {
         $body = [
-            'key'   => \base64_encode($key),
-            'value' => \base64_encode($value),
+            'key'   => base64_encode($key),
+            'value' => base64_encode($value),
         ];
         if (isset($options['lease'])) {
             $body['lease'] = $options['lease'];
@@ -59,10 +59,10 @@ class KvClient
      */
     public function get(string $key, array $options = []): array
     {
-        $body = ['key' => \base64_encode($key)];
+        $body = ['key' => base64_encode($key)];
 
         if (!empty($options['rangeEnd'])) {
-            $body['range_end'] = \base64_encode($options['rangeEnd']);
+            $body['range_end'] = base64_encode($options['rangeEnd']);
         }
         if (isset($options['limit'])) {
             $body['limit'] = (int) $options['limit'];
@@ -112,10 +112,10 @@ class KvClient
      */
     public function delete(string $key, array $options = []): array
     {
-        $body = ['key' => \base64_encode($key)];
+        $body = ['key' => base64_encode($key)];
 
         if (!empty($options['rangeEnd'])) {
-            $body['range_end'] = \base64_encode($options['rangeEnd']);
+            $body['range_end'] = base64_encode($options['rangeEnd']);
         }
         if (!empty($options['prevKv'])) {
             $body['prev_kv'] = true;
@@ -175,11 +175,11 @@ class KvClient
             return "\x00";
         }
         $bytes = $prefix;
-        $len = \strlen($bytes);
+        $len = strlen($bytes);
         for ($i = $len - 1; $i >= 0; $i--) {
-            $c = \ord($bytes[$i]);
+            $c = ord($bytes[$i]);
             if ($c < 0xFF) {
-                return \substr($bytes, 0, $i) . \chr($c + 1);
+                return substr($bytes, 0, $i) . chr($c + 1);
             }
         }
         return '';
@@ -194,7 +194,7 @@ class KvClient
         return [
             'header' => $r['header'] ?? [],
             'kvs'    => $kvs,
-            'count'  => (int) ($r['count'] ?? \count($kvs)),
+            'count'  => (int) ($r['count'] ?? count($kvs)),
             'more'   => !empty($r['more']),
         ];
     }
@@ -248,8 +248,8 @@ class KvClient
     private function decodeKv(array $kv): array
     {
         return [
-            'key'              => ($d = \base64_decode($kv['key'] ?? '', true)) !== false ? $d : ($kv['key'] ?? ''),
-            'value'            => \array_key_exists('value', $kv) ? (($d = \base64_decode($kv['value'], true)) !== false ? $d : $kv['value']) : null,
+            'key'              => ($d = base64_decode($kv['key'] ?? '', true)) !== false ? $d : ($kv['key'] ?? ''),
+            'value'            => array_key_exists('value', $kv) ? (($d = base64_decode($kv['value'], true)) !== false ? $d : $kv['value']) : null,
             'create_revision'  => (int) ($kv['create_revision'] ?? 0),
             'mod_revision'     => (int) ($kv['mod_revision'] ?? 0),
             'version'          => (int) ($kv['version'] ?? 0),
@@ -259,20 +259,20 @@ class KvClient
 
     private function encodeComparisons(array $compares): array
     {
-        return \array_map(function ($c) {
+        return array_map(function ($c) {
             $encoded = [
                 'result' => $c['result'] ?? 0,
                 'target' => $c['target'] ?? 0,
-                'key'    => \base64_encode($c['key'] ?? ''),
+                'key'    => base64_encode($c['key'] ?? ''),
             ];
             if (isset($c['range_end'])) {
-                $encoded['range_end'] = \base64_encode($c['range_end']);
+                $encoded['range_end'] = base64_encode($c['range_end']);
             }
             switch ($c['target'] ?? 0) {
                 case 0: $encoded['version'] = $c['version'] ?? 0; break;
                 case 1: $encoded['create_revision'] = $c['create_revision'] ?? 0; break;
                 case 2: $encoded['mod_revision'] = $c['mod_revision'] ?? 0; break;
-                case 3: $encoded['value'] = \base64_encode($c['value'] ?? ''); break;
+                case 3: $encoded['value'] = base64_encode($c['value'] ?? ''); break;
                 case 4: $encoded['lease'] = $c['lease'] ?? 0; break;
             }
             return $encoded;
@@ -281,11 +281,11 @@ class KvClient
 
     private function encodeRequestOps(array $ops): array
     {
-        return \array_map(function ($op) {
+        return array_map(function ($op) {
             if (isset($op['request_put'])) {
                 $r = [
-                    'key'   => \base64_encode($op['request_put']['key'] ?? ''),
-                    'value' => \base64_encode($op['request_put']['value'] ?? ''),
+                    'key'   => base64_encode($op['request_put']['key'] ?? ''),
+                    'value' => base64_encode($op['request_put']['value'] ?? ''),
                 ];
                 if (isset($op['request_put']['lease'])) {
                     $r['lease'] = $op['request_put']['lease'];
@@ -293,16 +293,16 @@ class KvClient
                 return ['request_put' => $r];
             }
             if (isset($op['request_range'])) {
-                $r = ['key' => \base64_encode($op['request_range']['key'] ?? '')];
+                $r = ['key' => base64_encode($op['request_range']['key'] ?? '')];
                 if (isset($op['request_range']['range_end'])) {
-                    $r['range_end'] = \base64_encode($op['request_range']['range_end']);
+                    $r['range_end'] = base64_encode($op['request_range']['range_end']);
                 }
                 return ['request_range' => $r];
             }
             if (isset($op['request_delete_range'])) {
-                $r = ['key' => \base64_encode($op['request_delete_range']['key'] ?? '')];
+                $r = ['key' => base64_encode($op['request_delete_range']['key'] ?? '')];
                 if (isset($op['request_delete_range']['range_end'])) {
-                    $r['range_end'] = \base64_encode($op['request_delete_range']['range_end']);
+                    $r['range_end'] = base64_encode($op['request_delete_range']['range_end']);
                 }
                 return ['request_delete_range' => $r];
             }

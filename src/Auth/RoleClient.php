@@ -28,8 +28,8 @@ class RoleClient
         foreach ($response['perm'] ?? [] as $p) {
             $perms[] = [
                 'permType'  => (int) ($p['permType'] ?? 0),
-                'key'       => ($d = \base64_decode($p['key'] ?? '', true)) !== false ? $d : ($p['key'] ?? ''),
-                'range_end' => ($d = \base64_decode($p['range_end'] ?? '', true)) !== false ? $d : ($p['range_end'] ?? ''),
+                'key'       => ($d = base64_decode($p['key'] ?? '', true)) !== false ? $d : ($p['key'] ?? ''),
+                'range_end' => ($d = base64_decode($p['range_end'] ?? '', true)) !== false ? $d : ($p['range_end'] ?? ''),
             ];
         }
         return [
@@ -62,10 +62,10 @@ class RoleClient
     {
         $perm = [
             'permType' => $permType,
-            'key'      => \base64_encode($key),
+            'key'      => base64_encode($key),
         ];
         if ($rangeEnd !== '') {
-            $perm['range_end'] = \base64_encode($rangeEnd);
+            $perm['range_end'] = base64_encode($rangeEnd);
         }
         $response = $this->transport->send('/v3/auth/role/grant', [
             'name' => $role,
@@ -78,10 +78,10 @@ class RoleClient
     {
         $body = [
             'role' => $role,
-            'key'  => \base64_encode($key),
+            'key'  => base64_encode($key),
         ];
         if ($rangeEnd !== '') {
-            $body['range_end'] = \base64_encode($rangeEnd);
+            $body['range_end'] = base64_encode($rangeEnd);
         }
         $response = $this->transport->send('/v3/auth/role/revoke', $body);
         return ['header' => $response['header'] ?? []];

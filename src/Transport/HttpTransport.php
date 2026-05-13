@@ -61,13 +61,13 @@ class HttpTransport implements TransportInterface
         $endpoint = $this->pickEndpoint();
         $url = "http://{$endpoint}{$path}";
 
-        $bodyJson = \json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $bodyJson = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         $request = $this->getRequestFactory()->createRequest('POST', $url)
             ->withHeader('Content-Type', 'application/json')
             ->withBody($this->getStreamFactory()->createStream($bodyJson));
 
         if (!empty($this->config['auth']['user'])) {
-            $credentials = \base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
+            $credentials = base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
             $request = $request->withHeader('Authorization', 'Basic ' . $credentials);
         }
 
@@ -84,12 +84,12 @@ class HttpTransport implements TransportInterface
                 }
 
                 if ($response->getStatusCode() >= 400) {
-                    $errData = \json_decode($responseBody, true);
+                    $errData = json_decode($responseBody, true);
                     $message = $errData['message'] ?? $errData['error'] ?? "HTTP {$response->getStatusCode()}";
                     throw new EtcdException("etcd error: {$message}");
                 }
 
-                return \json_decode($responseBody, true, 512, JSON_THROW_ON_ERROR);
+                return json_decode($responseBody, true, 512, JSON_THROW_ON_ERROR);
 
             } catch (AuthException $e) {
                 throw $e;
@@ -98,7 +98,7 @@ class HttpTransport implements TransportInterface
             } catch (\Throwable $e) {
                 $lastException = $e;
                 if ($i < $retries) {
-                    \usleep(100000);
+                    usleep(100000);
                 }
             }
         }
@@ -115,16 +115,16 @@ class HttpTransport implements TransportInterface
         $url = "http://{$endpoint}/v3/watch";
 
         $createRequest = [
-            'key' => \base64_encode($key),
+            'key' => base64_encode($key),
         ];
         if ($rangeEnd !== '') {
-            $createRequest['range_end'] = \base64_encode($rangeEnd);
+            $createRequest['range_end'] = base64_encode($rangeEnd);
         }
         if ($startRevision > 0) {
             $createRequest['start_revision'] = $startRevision;
         }
 
-        $body = \json_encode(['create_request' => $createRequest], JSON_THROW_ON_ERROR);
+        $body = json_encode(['create_request' => $createRequest], JSON_THROW_ON_ERROR);
 
         $contextOpts = [
             'http' => [
@@ -136,46 +136,46 @@ class HttpTransport implements TransportInterface
         ];
 
         if (!empty($this->config['auth']['user'])) {
-            $credentials = \base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
+            $credentials = base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
             $contextOpts['http']['header'] .= "Authorization: Basic {$credentials}\r\n";
         }
 
-        $context = \stream_context_create($contextOpts);
-        $stream = @\fopen($url, 'r', false, $context);
+        $context = stream_context_create($contextOpts);
+        $stream = @fopen($url, 'r', false, $context);
 
         if (!$stream) {
             throw new ConnectionException("Failed to open watch stream to {$url}");
         }
 
-        \stream_set_blocking($stream, false);
+        stream_set_blocking($stream, false);
 
         $lastRevision = $startRevision;
 
         while (true) {
-            $line = \fgets($stream);
+            $line = fgets($stream);
             if ($line === false) {
-                if (\feof($stream)) {
-                    \fclose($stream);
+                if (feof($stream)) {
+                    fclose($stream);
                     $createRequest['start_revision'] = $lastRevision;
-                    $body = \json_encode(['create_request' => $createRequest], JSON_THROW_ON_ERROR);
+                    $body = json_encode(['create_request' => $createRequest], JSON_THROW_ON_ERROR);
                     $contextOpts['http']['content'] = $body;
-                    $context = \stream_context_create($contextOpts);
-                    $stream = @\fopen($url, 'r', false, $context);
+                    $context = stream_context_create($contextOpts);
+                    $stream = @fopen($url, 'r', false, $context);
                     if (!$stream) {
                         throw new ConnectionException("Watch reconnect failed");
                     }
-                    \stream_set_blocking($stream, false);
+                    stream_set_blocking($stream, false);
                     continue;
                 }
-                \usleep(50000);
+                usleep(50000);
                 continue;
             }
-            $line = \trim($line);
+            $line = trim($line);
             if ($line === '') {
                 continue;
             }
 
-            $data = \json_decode($line, true);
+            $data = json_decode($line, true);
             if ($data === null || !isset($data['result'])) {
                 continue;
             }
@@ -194,11 +194,11 @@ class HttpTransport implements TransportInterface
                 }
                 $kv = $event['kv'] ?? [];
                 if (isset($kv['key'])) {
-                    $d = \base64_decode($kv['key'], true);
+                    $d = base64_decode($kv['key'], true);
                     $kv['key'] = $d !== false ? $d : $kv['key'];
                 }
                 if (isset($kv['value'])) {
-                    $d = \base64_decode($kv['value'], true);
+                    $d = base64_decode($kv['value'], true);
                     $kv['value'] = $d !== false ? $d : $kv['value'];
                 }
                 $events[] = ['type' => $type, 'kv' => $kv];
@@ -212,6 +212,6 @@ class HttpTransport implements TransportInterface
 
     private function pickEndpoint(): string
     {
-        return $this->endpoints[\array_rand($this->endpoints)];
+        return $this->endpoints[array_rand($this->endpoints)];
     }
 }

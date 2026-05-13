@@ -14,7 +14,7 @@ class ConfigProvider
             'dependencies' => [
                 EtcdClient::class => function () {
                     $config = [];
-                    if (\function_exists('\Hyperf\Support\env')) {
+                    if (function_exists('\Hyperf\Support\env')) {
                         $config = \Hyperf\Support\env('etcd', []);
                     }
                     return new EtcdClient($config);

@@ -28,7 +28,7 @@ class TransportSelector
             return new HttpTransport($endpoints, $config);
         }
 
-        if (\extension_loaded('grpc')) {
+        if (extension_loaded('grpc')) {
             return new GrpcTransport($endpoints, $config);
         }
 

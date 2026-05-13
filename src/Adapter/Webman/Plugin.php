@@ -11,13 +11,13 @@ class Plugin
      */
     public static function install(): void
     {
-        $configDir = \config_path() . '/plugin/erikwang2013/etcd';
-        if (!\is_dir($configDir)) {
-            \mkdir($configDir, 0755, true);
+        $configDir = config_path() . '/plugin/erikwang2013/etcd';
+        if (!is_dir($configDir)) {
+            mkdir($configDir, 0755, true);
         }
         $configFile = $configDir . '/etcd.php';
-        if (!\file_exists($configFile)) {
-            \copy(
+        if (!file_exists($configFile)) {
+            copy(
                 __DIR__ . '/../../../../config/etcd.php',
                 $configFile
             );

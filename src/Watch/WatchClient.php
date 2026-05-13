@@ -49,11 +49,11 @@ class WatchClient
             return "\x00";
         }
         $bytes = $prefix;
-        $len = \strlen($bytes);
+        $len = strlen($bytes);
         for ($i = $len - 1; $i >= 0; $i--) {
-            $c = \ord($bytes[$i]);
+            $c = ord($bytes[$i]);
             if ($c < 0xFF) {
-                return \substr($bytes, 0, $i) . \chr($c + 1);
+                return substr($bytes, 0, $i) . chr($c + 1);
             }
         }
         return '';

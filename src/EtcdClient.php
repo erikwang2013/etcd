@@ -31,7 +31,7 @@ class EtcdClient
      */
     public function __construct(array $config = [])
     {
-        $this->config = \array_merge(
+        $this->config = array_merge(
             ['endpoints' => ['127.0.0.1:2379'], 'transport' => 'http', 'timeout' => 5.0, 'retry' => 2],
             $config
         );

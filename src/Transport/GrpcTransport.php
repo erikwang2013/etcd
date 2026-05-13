@@ -36,7 +36,7 @@ class GrpcTransport implements TransportInterface
     {
         static $channels = [];
         if (!isset($channels[$endpoint])) {
-            if (!\class_exists('\Grpc\Channel')) {
+            if (!class_exists('\Grpc\Channel')) {
                 throw new ConnectionException('gRPC extension not available. Install grpc/grpc or use HTTP transport.');
             }
             $channels[$endpoint] = new \Grpc\Channel(
@@ -54,7 +54,7 @@ class GrpcTransport implements TransportInterface
 
     private function pickEndpoint(): string
     {
-        $this->currentEndpoint = $this->endpoints[\array_rand($this->endpoints)];
+        $this->currentEndpoint = $this->endpoints[array_rand($this->endpoints)];
         return $this->currentEndpoint;
     }
 }
