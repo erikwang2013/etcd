@@ -49,7 +49,7 @@
 **为什么默认传输是 `auto` 而非 `http`？**  
 设计目标是与 gRPC 扩展共存的自动检测。`auto` 模式检查两个条件：`extension_loaded('grpc')` AND `class_exists('Grpc\BaseStub')`。后者确保 `grpc/grpc` composer 包已安装（不仅是 C 扩展），避免选中骨架实现。
 
-## 六大于系统
+## 六大系统
 
 ### 1. KV（键值存储）
 
