@@ -443,4 +443,4 @@ src/
 
 ## License
 
-MIT
+MIT — Copyright (c) 2026 [erik](https://erik.xyz) <erik@erik.xyz>
