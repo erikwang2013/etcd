@@ -113,7 +113,7 @@ class MaintenanceClient
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 300);
 
-        if (!empty($this->config['auth']['user'])) {
+        if (!empty($this->config['auth']['user'] ?? null)) {
             $credentials = base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
             curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Basic ' . $credentials]);
         }

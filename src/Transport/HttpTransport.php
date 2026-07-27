@@ -74,7 +74,7 @@ class HttpTransport implements TransportInterface
             ->withHeader('Content-Type', 'application/json')
             ->withBody($this->getStreamFactory()->createStream($bodyJson));
 
-        if (!empty($this->config['auth']['user'])) {
+        if (!empty($this->config['auth']['user'] ?? null)) {
             $credentials = base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
             $request = $request->withHeader('Authorization', 'Basic ' . $credentials);
         }
@@ -149,7 +149,7 @@ class HttpTransport implements TransportInterface
             ],
         ];
 
-        if (!empty($this->config['auth']['user'])) {
+        if (!empty($this->config['auth']['user'] ?? null)) {
             $credentials = base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
             $contextOpts['http']['header'] .= "Authorization: Basic {$credentials}\r\n";
         }

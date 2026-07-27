@@ -3,4 +3,8 @@
 /.phpunit.cache
 /phpunit.xml
 .DS_Store
-/.claude
+.claude
+.claude-flow
+.swarm
+.mcp.json
+ruvector.db
