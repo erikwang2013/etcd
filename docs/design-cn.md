@@ -89,7 +89,7 @@ watchPrefix(prefix, callback, [...])
 ```
 
 **断线重连机制：**  
-`HttpTransport::watch()` 在检测到 EOF 时自动从 `lastRevision` 重建连接，确保不丢事件。非阻塞 I/O（`stream_set_blocking(false)`）避免阻塞 PHP 进程。
+`HttpTransport::watch()` 在检测到 EOF 时自动从 `lastRevision` 重建连接，并随机选择新端点，确保不丢事件且支持故障转移。非阻塞 I/O（`stream_set_blocking(false)`）避免阻塞 PHP 进程。
 
 **回调事件格式：**
 ```php
@@ -154,7 +154,7 @@ maintenance().status()       → {version, dbSize, leader, raftIndex, raftTerm, 
 maintenance().alarm([action, alarm, memberID])
 maintenance().defragment()
 maintenance().hash([revision])
-maintenance().snapshot()     → 返回原始二进制数据
+maintenance().snapshot()     → 通过 sendRaw() 走 PSR-18 返回原始二进制数据
 ```
 
 ## 传输层设计
@@ -164,6 +164,7 @@ maintenance().snapshot()     → 返回原始二进制数据
 ```php
 interface TransportInterface {
     public function send(string $path, array $body): array;
+    public function sendRaw(string $path): string;
     public function watch(string $key, string $rangeEnd, int $startRevision, callable $onEvent, array $options = []): void;
 }
 ```
@@ -309,3 +310,18 @@ erikwang2013/etcd/
 - [ ] 单元测试 + 集成测试（Docker etcd 容器）
 - [ ] Watch 多 key 并行监听
 - [ ] 连接池 / 长连接复用
+
+## 开源不易，欢迎支持 / Support This Project
+
+<p align="center">
+  <table>
+    <tr>
+      <td align="center"><b>微信 / WeChat</b></td>
+      <td align="center"><b>支付宝 / Alipay</b></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="./weixinpay.png" alt="微信支付" width="130" height="130" /></td>
+      <td align="center"><img src="./alipay.png" alt="支付宝" width="130" height="130" /></td>
+    </tr>
+  </table>
+</p>

@@ -35,12 +35,12 @@ class EtcdClient
     private static ?self $instance = null;
 
     /**
-     * @param array{endpoints: list<string>, transport?: string, timeout?: float, retry?: int, auth?: array{user: string, password: string}, options?: array} $config
+     * @param array{endpoints: list<string>, transport?: string, scheme?: string, timeout?: float, retry?: int, auth?: array{user: string, password: string}, options?: array} $config
      */
     public function __construct(array $config = [])
     {
         $this->config = array_merge(
-            ['endpoints' => ['127.0.0.1:2379'], 'transport' => 'auto', 'timeout' => 5.0, 'retry' => 2],
+            ['endpoints' => ['127.0.0.1:2379'], 'transport' => 'auto', 'scheme' => 'http', 'timeout' => 5.0, 'retry' => 2],
             $config
         );
         $this->transport = TransportSelector::select($this->config);
@@ -48,13 +48,15 @@ class EtcdClient
 
     /**
      * Get or create the singleton instance (useful for Webman / non-DI frameworks).
+     *
+     * @throws \LogicException if called with new config after singleton already initialized
      */
     public static function instance(array $config = []): self
     {
         if (self::$instance === null) {
             self::$instance = new self($config);
         } elseif (!empty($config)) {
-            trigger_error('EtcdClient::instance() called with config after singleton already initialized. Config ignored. Call resetInstance() first if you need to reinitialize.', E_USER_WARNING);
+            throw new \LogicException('EtcdClient::instance() called with config after singleton already initialized. Call resetInstance() first if you need to reinitialize.');
         }
         return self::$instance;
     }
@@ -65,6 +67,25 @@ class EtcdClient
     public static function resetInstance(): void
     {
         self::$instance = null;
+    }
+
+    /**
+     * Calculate the range_end for a given prefix, so that a range query
+     * on [prefix, range_end) returns all keys with that prefix.
+     */
+    public static function prefixToRangeEnd(string $prefix): string
+    {
+        if ($prefix === '') {
+            return "\x00";
+        }
+        $len = strlen($prefix);
+        for ($i = $len - 1; $i >= 0; $i--) {
+            $c = ord($prefix[$i]);
+            if ($c < 0xFF) {
+                return substr($prefix, 0, $i) . chr($c + 1);
+            }
+        }
+        return '';
     }
 
     public function kv(): KvClient
@@ -94,7 +115,7 @@ class EtcdClient
 
     public function maintenance(): MaintenanceClient
     {
-        return $this->maintenanceClient ??= new MaintenanceClient($this->transport, $this->config);
+        return $this->maintenanceClient ??= new MaintenanceClient($this->transport);
     }
 
     public function transport(): TransportInterface

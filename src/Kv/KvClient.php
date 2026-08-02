@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace Erikwang2013\Etcd\Kv;
 
 use Erikwang2013\Etcd\Transport\TransportInterface;
+use Erikwang2013\Etcd\EtcdClient;
 
 class KvClient
 {
@@ -107,8 +108,7 @@ class KvClient
      */
     public function getByPrefix(string $prefix, array $options = []): array
     {
-        $rangeEnd = $this->prefixToRangeEnd($prefix);
-        $options['rangeEnd'] = $rangeEnd;
+        $options['rangeEnd'] = EtcdClient::prefixToRangeEnd($prefix);
         return $this->get($prefix, $options);
     }
 
@@ -153,7 +153,7 @@ class KvClient
      */
     public function deleteByPrefix(string $prefix, array $options = []): array
     {
-        $options['rangeEnd'] = $this->prefixToRangeEnd($prefix);
+        $options['rangeEnd'] = EtcdClient::prefixToRangeEnd($prefix);
         return $this->delete($prefix, $options);
     }
 
@@ -191,22 +191,6 @@ class KvClient
     }
 
     // --- Internal helpers ---
-
-    private function prefixToRangeEnd(string $prefix): string
-    {
-        if ($prefix === '') {
-            return "\x00";
-        }
-        $bytes = $prefix;
-        $len = strlen($bytes);
-        for ($i = $len - 1; $i >= 0; $i--) {
-            $c = ord($bytes[$i]);
-            if ($c < 0xFF) {
-                return substr($bytes, 0, $i) . chr($c + 1);
-            }
-        }
-        return '';
-    }
 
     private function decodeRangeResponse(array $r): array
     {

@@ -17,6 +17,11 @@ interface TransportInterface
     public function send(string $path, array $body): array;
 
     /**
+     * Send a request and return the raw response body (for binary endpoints like snapshot).
+     */
+    public function sendRaw(string $path): string;
+
+    /**
      * @param callable $onEvent  function(array $events): void
      * @param array    $options  'prevKv' => bool, 'progressNotify' => bool
      */

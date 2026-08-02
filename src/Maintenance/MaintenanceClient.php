@@ -13,17 +13,14 @@ declare(strict_types=1);
 namespace Erikwang2013\Etcd\Maintenance;
 
 use Erikwang2013\Etcd\Transport\TransportInterface;
-use Erikwang2013\Etcd\Exception\EtcdException;
 
 class MaintenanceClient
 {
     private TransportInterface $transport;
-    private array $config;
 
-    public function __construct(TransportInterface $transport, array $config = [])
+    public function __construct(TransportInterface $transport)
     {
         $this->transport = $transport;
-        $this->config = $config;
     }
 
     /**
@@ -103,29 +100,6 @@ class MaintenanceClient
      */
     public function snapshot(): string
     {
-        $endpoints = $this->config['endpoints'] ?? ['127.0.0.1:2379'];
-        $endpoint = $endpoints[array_rand($endpoints)];
-        $url = "http://{$endpoint}/v3/maintenance/snapshot";
-
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, '{}');
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 300);
-
-        if (!empty($this->config['auth']['user'] ?? null)) {
-            $credentials = base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
-            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Basic ' . $credentials]);
-        }
-
-        $data = curl_exec($ch);
-        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($httpCode !== 200) {
-            throw new EtcdException("Snapshot failed with HTTP {$httpCode}");
-        }
-
-        return $data;
+        return $this->transport->sendRaw('/v3/maintenance/snapshot');
     }
 }

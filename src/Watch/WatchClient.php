@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace Erikwang2013\Etcd\Watch;
 
 use Erikwang2013\Etcd\Transport\TransportInterface;
+use Erikwang2013\Etcd\EtcdClient;
 
 class WatchClient
 {
@@ -54,23 +55,7 @@ class WatchClient
      */
     public function watchPrefix(string $prefix, callable $onEvent, array $options = []): void
     {
-        $options['rangeEnd'] = $this->prefixToRangeEnd($prefix);
+        $options['rangeEnd'] = EtcdClient::prefixToRangeEnd($prefix);
         $this->watch($prefix, $onEvent, $options);
-    }
-
-    private function prefixToRangeEnd(string $prefix): string
-    {
-        if ($prefix === '') {
-            return "\x00";
-        }
-        $bytes = $prefix;
-        $len = strlen($bytes);
-        for ($i = $len - 1; $i >= 0; $i--) {
-            $c = ord($bytes[$i]);
-            if ($c < 0xFF) {
-                return substr($bytes, 0, $i) . chr($c + 1);
-            }
-        }
-        return '';
     }
 }

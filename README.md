@@ -53,7 +53,8 @@ $etcd->lease()->keepAlive($lease['ID']);
 $etcd = new EtcdClient([
     'endpoints' => ['192.168.1.10:2379', '192.168.1.11:2379'],  // 多节点
     'transport' => 'auto',  // auto（默认）| http | grpc
-    'timeout'   => 5.0,     // 秒
+    'scheme'    => 'http',  // http（默认）| https
+    'timeout'   => 5.0,     // 秒（需在 PSR-18 客户端配置）
     'retry'     => 3,       // 连接失败重试次数
     'auth'      => [        // 可选，Basic Auth
         'user'     => 'root',
@@ -71,6 +72,7 @@ $etcd = new EtcdClient([
 | `ETCD_ENDPOINTS` | `127.0.0.1:2379` | 逗号分隔的多节点地址 |
 | `ETCD_TRANSPORT` | `auto` | auto / http / grpc |
 | `ETCD_TIMEOUT` | `5.0` | 请求超时（秒） |
+| `ETCD_SCHEME` | `http` | http / https |
 | `ETCD_RETRY` | `2` | 连接重试次数 |
 | `ETCD_USER` | — | etcd 用户名 |
 | `ETCD_PASSWORD` | — | etcd 密码 |
@@ -441,11 +443,20 @@ src/
     └── Webman/                 #   Plugin
 ```
 
-## 开源不易，欢迎支持
+## 开源不易，欢迎支持 / Support This Project
 
-| 微信 | 支付宝 |
-|:---:|:---:|
-| ![微信](./docs/weixinpay.png "微信") | ![支付宝](./docs/alipay.png "支付宝") |
+<p align="center">
+  <table>
+    <tr>
+      <td align="center"><b>微信 / WeChat</b></td>
+      <td align="center"><b>支付宝 / Alipay</b></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="./docs/weixinpay.png" alt="微信支付" width="130" height="130" /></td>
+      <td align="center"><img src="./docs/alipay.png" alt="支付宝" width="130" height="130" /></td>
+    </tr>
+  </table>
+</p>
 
 ---
 

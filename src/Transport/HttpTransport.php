@@ -66,23 +66,24 @@ class HttpTransport implements TransportInterface
 
     public function send(string $path, array $body): array
     {
-        $endpoint = $this->pickEndpoint();
-        $url = "http://{$endpoint}{$path}";
-
         $bodyJson = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-        $request = $this->getRequestFactory()->createRequest('POST', $url)
-            ->withHeader('Content-Type', 'application/json')
-            ->withBody($this->getStreamFactory()->createStream($bodyJson));
-
-        if (!empty($this->config['auth']['user'] ?? null)) {
-            $credentials = base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
-            $request = $request->withHeader('Authorization', 'Basic ' . $credentials);
-        }
-
         $retries = $this->config['retry'] ?? 2;
+        $scheme = $this->config['scheme'] ?? 'http';
         $lastException = null;
 
         for ($i = 0; $i <= $retries; $i++) {
+            $endpoint = $this->pickEndpoint();
+            $url = "{$scheme}://{$endpoint}{$path}";
+
+            $request = $this->getRequestFactory()->createRequest('POST', $url)
+                ->withHeader('Content-Type', 'application/json')
+                ->withBody($this->getStreamFactory()->createStream($bodyJson));
+
+            if (!empty($this->config['auth']['user'] ?? null)) {
+                $credentials = base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
+                $request = $request->withHeader('Authorization', 'Basic ' . $credentials);
+            }
+
             try {
                 $response = $this->getHttpClient()->sendRequest($request);
                 $responseBody = (string) $response->getBody();
@@ -93,7 +94,11 @@ class HttpTransport implements TransportInterface
 
                 if ($response->getStatusCode() >= 400) {
                     $errData = json_decode($responseBody, true);
-                    $message = $errData['message'] ?? $errData['error'] ?? "HTTP {$response->getStatusCode()}";
+                    if ($errData !== null) {
+                        $message = $errData['message'] ?? $errData['error'] ?? "HTTP {$response->getStatusCode()}";
+                    } else {
+                        $message = "HTTP {$response->getStatusCode()}: " . substr($responseBody, 0, 200);
+                    }
                     throw new EtcdException("etcd error: {$message}");
                 }
 
@@ -117,10 +122,35 @@ class HttpTransport implements TransportInterface
         );
     }
 
+    public function sendRaw(string $path): string
+    {
+        $scheme = $this->config['scheme'] ?? 'http';
+        $endpoint = $this->pickEndpoint();
+        $url = "{$scheme}://{$endpoint}{$path}";
+
+        $request = $this->getRequestFactory()->createRequest('POST', $url)
+            ->withHeader('Content-Type', 'application/json')
+            ->withBody($this->getStreamFactory()->createStream('{}'));
+
+        if (!empty($this->config['auth']['user'] ?? null)) {
+            $credentials = base64_encode($this->config['auth']['user'] . ':' . ($this->config['auth']['password'] ?? ''));
+            $request = $request->withHeader('Authorization', 'Basic ' . $credentials);
+        }
+
+        $response = $this->getHttpClient()->sendRequest($request);
+
+        if ($response->getStatusCode() >= 400) {
+            throw new EtcdException("Request failed with HTTP {$response->getStatusCode()}: {$path}");
+        }
+
+        return (string) $response->getBody();
+    }
+
     public function watch(string $key, string $rangeEnd, int $startRevision, callable $onEvent, array $options = []): void
     {
+        $scheme = $this->config['scheme'] ?? 'http';
         $endpoint = $this->pickEndpoint();
-        $url = "http://{$endpoint}/v3/watch";
+        $url = "{$scheme}://{$endpoint}/v3/watch";
 
         $createRequest = [
             'key' => base64_encode($key),
@@ -170,6 +200,8 @@ class HttpTransport implements TransportInterface
             if ($line === false) {
                 if (feof($stream)) {
                     fclose($stream);
+                    $endpoint = $this->pickEndpoint();
+                    $url = "{$scheme}://{$endpoint}/v3/watch";
                     $createRequest['start_revision'] = $lastRevision;
                     $body = json_encode(['create_request' => $createRequest], JSON_THROW_ON_ERROR);
                     $contextOpts['http']['content'] = $body;
