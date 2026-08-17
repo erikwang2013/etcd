@@ -81,11 +81,17 @@ class KvClient
         }
         if (!empty($options['sortOrder'])) {
             $orderMap = ['none' => 0, 'ascend' => 1, 'descend' => 2];
-            $body['sort_order'] = $orderMap[$options['sortOrder']] ?? 0;
+            if (!isset($orderMap[$options['sortOrder']])) {
+                throw new \InvalidArgumentException("Invalid sortOrder: {$options['sortOrder']}");
+            }
+            $body['sort_order'] = $orderMap[$options['sortOrder']];
         }
         if (!empty($options['sortTarget'])) {
             $targetMap = ['key' => 0, 'version' => 1, 'create' => 2, 'mod' => 3, 'value' => 4];
-            $body['sort_target'] = $targetMap[$options['sortTarget']] ?? 0;
+            if (!isset($targetMap[$options['sortTarget']])) {
+                throw new \InvalidArgumentException("Invalid sortTarget: {$options['sortTarget']}");
+            }
+            $body['sort_target'] = $targetMap[$options['sortTarget']];
         }
         if (!empty($options['serializable'])) {
             $body['serializable'] = true;

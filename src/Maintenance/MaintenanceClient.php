@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace Erikwang2013\Etcd\Maintenance;
 
 use Erikwang2013\Etcd\Transport\TransportInterface;
+use Erikwang2013\Etcd\Exception\EtcdException;
 
 class MaintenanceClient
 {
@@ -31,6 +32,9 @@ class MaintenanceClient
     public function status(): array
     {
         $response = $this->transport->send('/v3/maintenance/status', []);
+        if (!empty($response['errors'])) {
+            throw new EtcdException('etcd member unhealthy: ' . implode('; ', $response['errors']));
+        }
         return [
             'header'           => $response['header'] ?? [],
             'version'          => $response['version'] ?? '',
@@ -88,9 +92,12 @@ class MaintenanceClient
             $body['revision'] = $revision;
         }
         $response = $this->transport->send('/v3/maintenance/hash', $body);
+        if (!array_key_exists('hash', $response)) {
+            throw new EtcdException('hash field missing in response');
+        }
         return [
             'header' => $response['header'] ?? [],
-            'hash'   => (int) ($response['hash'] ?? 0),
+            'hash'   => (int) $response['hash'],
         ];
     }
 

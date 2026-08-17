@@ -85,7 +85,8 @@ class EtcdClient
                 return substr($prefix, 0, $i) . chr($c + 1);
             }
         }
-        return '';
+        // prefix is all 0xFF: range [prefix, "\x00") covers every possible byte after it
+        return "\x00";
     }
 
     public function kv(): KvClient

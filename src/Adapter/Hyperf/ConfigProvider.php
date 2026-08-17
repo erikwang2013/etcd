@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace Erikwang2013\Etcd\Adapter\Hyperf;
 
 use Erikwang2013\Etcd\EtcdClient;
+use Hyperf\Contract\ConfigInterface;
 
 class ConfigProvider
 {
@@ -20,11 +21,8 @@ class ConfigProvider
     {
         return [
             'dependencies' => [
-                EtcdClient::class => function () {
-                    $config = [];
-                    if (function_exists('\Hyperf\Support\env')) {
-                        $config = \Hyperf\Support\env('etcd', []);
-                    }
+                EtcdClient::class => function ($container) {
+                    $config = $container->get(ConfigInterface::class)->get('etcd', []);
                     return new EtcdClient($config);
                 },
             ],
@@ -32,7 +30,7 @@ class ConfigProvider
                 [
                     'id'          => 'config',
                     'description' => 'etcd client config',
-                    'source'      => __DIR__ . '/../../../../config/etcd.php',
+                    'source'      => __DIR__ . '/../../../config/etcd.php',
                     'destination' => BASE_PATH . '/config/autoload/etcd.php',
                 ],
             ],

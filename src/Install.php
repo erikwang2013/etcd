@@ -10,13 +10,18 @@ declare(strict_types=1);
  * SPDX-License-Identifier: MIT
  */
 
-namespace Erikwang2013\Etcd\Adapter\Webman;
+namespace Erikwang2013\Etcd;
 
-class Plugin
+/**
+ * Webman plugin hook. Discovered by webman's post-autoload-dump scan
+ * (any package containing src/Install.php with a WEBMAN_PLUGIN constant).
+ * Config lands at config/plugin/erikwang2013/etcd/etcd.php and is read
+ * via config('plugin.erikwang2013.etcd.etcd').
+ */
+class Install
 {
-    /**
-     * Install — called once when composer require is run.
-     */
+    const WEBMAN_PLUGIN = 'erikwang2013/etcd';
+
     public static function install(): void
     {
         $configDir = config_path() . '/plugin/erikwang2013/etcd';
@@ -25,17 +30,11 @@ class Plugin
         }
         $configFile = $configDir . '/etcd.php';
         if (!file_exists($configFile)) {
-            copy(
-                __DIR__ . '/../../../../config/etcd.php',
-                $configFile
-            );
+            copy(__DIR__ . '/../config/etcd.php', $configFile);
         }
-        echo "erikwang2013/etcd plugin installed. Config at plugin/erikwang2013/etcd/etcd.php\n";
+        echo "erikwang2013/etcd plugin installed. Config at config/plugin/erikwang2013/etcd/etcd.php\n";
     }
 
-    /**
-     * Uninstall.
-     */
     public static function uninstall(): void
     {
         echo "erikwang2013/etcd plugin uninstalled.\n";

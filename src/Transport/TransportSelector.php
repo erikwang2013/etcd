@@ -32,14 +32,10 @@ class TransportSelector
             return new GrpcTransport($endpoints, $config);
         }
 
-        if ($transport === 'http') {
+        if ($transport === 'http' || $transport === 'auto') {
             return new HttpTransport($endpoints, $config);
         }
 
-        if (extension_loaded('grpc') && class_exists('Grpc\BaseStub')) {
-            return new GrpcTransport($endpoints, $config);
-        }
-
-        return new HttpTransport($endpoints, $config);
+        throw new ConnectionException("Unknown transport: {$transport}");
     }
 }

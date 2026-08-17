@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace Erikwang2013\Etcd\Lease;
 
 use Erikwang2013\Etcd\Transport\TransportInterface;
+use Erikwang2013\Etcd\Exception\EtcdException;
 
 class LeaseClient
 {
@@ -62,9 +63,13 @@ class LeaseClient
     public function keepAlive(int $id): array
     {
         $response = $this->transport->send('/v3/lease/keepalive', ['ID' => $id]);
+        $leaseId = (int) ($response['ID'] ?? 0);
+        if ($leaseId === 0) {
+            throw new EtcdException("Lease {$id} expired or not found; keepalive failed");
+        }
         return [
             'header' => $response['header'] ?? [],
-            'ID'     => (int) ($response['ID'] ?? 0),
+            'ID'     => $leaseId,
             'TTL'    => (int) ($response['TTL'] ?? 0),
         ];
     }

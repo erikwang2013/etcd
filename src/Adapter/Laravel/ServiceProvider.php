@@ -20,7 +20,7 @@ class ServiceProvider extends BaseServiceProvider
     public function register(): void
     {
         $this->mergeConfigFrom(
-            __DIR__ . '/../../../../config/etcd.php', 'etcd'
+            __DIR__ . '/../../../config/etcd.php', 'etcd'
         );
 
         $this->app->singleton(EtcdClient::class, function ($app) {
@@ -33,7 +33,7 @@ class ServiceProvider extends BaseServiceProvider
     public function boot(): void
     {
         $this->publishes([
-            __DIR__ . '/../../../../config/etcd.php' => config_path('etcd.php'),
+            __DIR__ . '/../../../config/etcd.php' => config_path('etcd.php'),
         ], 'etcd-config');
     }
 }
