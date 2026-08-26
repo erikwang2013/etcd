@@ -2,6 +2,7 @@
 /composer.lock
 /.phpunit.cache
 /phpunit.xml
+/tests/reports/
 .DS_Store
 .claude
 .claude-flow

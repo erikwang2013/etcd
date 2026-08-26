@@ -1,0 +1,64 @@
+name: Auto Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Determine next version
+        id: version
+        run: |
+          latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$latest" ]; then
+            echo "version=v0.1.0" >> "$GITHUB_OUTPUT"
+            echo "prev=" >> "$GITHUB_OUTPUT"
+          else
+            next=$(echo "$latest" | awk -F. '{print $1"."$2"."($3+1)}')
+            echo "version=$next" >> "$GITHUB_OUTPUT"
+            echo "prev=$latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run tests
+        run: composer install --no-interaction --prefer-dist && vendor/bin/phpunit --bootstrap vendor/autoload.php tests/Unit --no-coverage
+
+      - name: Build changelog since previous release
+        id: changelog
+        run: |
+          prev=${{ steps.version.outputs.prev }}
+          if [ -n "$prev" ]; then
+            range="$prev..HEAD"
+          else
+            range="HEAD"
+          fi
+          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
+          git log --oneline --no-merges "$range" | sed 's/^/- /' >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        run: |
+          git tag "v${{ steps.version.outputs.version }}"
+          git push origin "v${{ steps.version.outputs.version }}"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.version.outputs.version }}"
+          body: ${{ steps.changelog.outputs.notes }}
+          # No artifact packaging: this library ships as source only.
