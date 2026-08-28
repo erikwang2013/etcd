@@ -25,13 +25,13 @@ jobs:
       - name: Determine next version
         id: version
         run: |
-          latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          latest=$(git tag -l 'v[0-9]*' --sort=-v:refname | head -n1)
           if [ -z "$latest" ]; then
-            echo "version=v0.1.0" >> "$GITHUB_OUTPUT"
+            echo "version=0.1.0" >> "$GITHUB_OUTPUT"
             echo "prev=" >> "$GITHUB_OUTPUT"
           else
             next=$(echo "$latest" | awk -F. '{print $1"."$2"."($3+1)}')
-            echo "version=$next" >> "$GITHUB_OUTPUT"
+            echo "version=${next#v}" >> "$GITHUB_OUTPUT"
             echo "prev=$latest" >> "$GITHUB_OUTPUT"
           fi
 
