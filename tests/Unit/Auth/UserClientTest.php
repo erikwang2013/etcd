@@ -120,7 +120,7 @@ class UserClientTest extends TestCase
         $result = $client->grantRole('alice', 'admin');
 
         $this->assertSame([['/v3/auth/user/grant', [
-            'name' => 'alice',
+            'user' => 'alice',
             'role' => 'admin',
         ]]], $transport->sent);
         $this->assertSame(['header' => ['cluster_id' => '1']], $result);

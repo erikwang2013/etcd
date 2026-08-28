@@ -68,7 +68,7 @@ class UserClient
     public function grantRole(string $user, string $role): array
     {
         $response = $this->transport->send('/v3/auth/user/grant', [
-            'name' => $user,
+            'user' => $user,
             'role' => $role,
         ]);
         return ['header' => $response['header'] ?? []];

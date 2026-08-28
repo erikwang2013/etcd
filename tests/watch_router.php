@@ -19,7 +19,7 @@ switch ($path) {
                 'result' => [
                     'header' => ['revision' => $i],
                     'events' => [[
-                        'type' => 0,
+                        'type' => $i === 3 ? 'DELETE' : 'PUT',
                         'kv'   => [
                             'key'   => base64_encode("k{$i}"),
                             'value' => base64_encode("v{$i}"),

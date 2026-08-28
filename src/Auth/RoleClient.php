@@ -35,7 +35,7 @@ class RoleClient
         $perms = [];
         foreach ($response['perm'] ?? [] as $p) {
             $perms[] = [
-                'permType'  => (int) ($p['permType'] ?? 0),
+                'permType'  => self::parsePermType($p['permType'] ?? 0),
                 'key'       => ($d = base64_decode($p['key'] ?? '', true)) !== false ? $d : ($p['key'] ?? ''),
                 'range_end' => ($d = base64_decode($p['range_end'] ?? '', true)) !== false ? $d : ($p['range_end'] ?? ''),
             ];
@@ -53,6 +53,17 @@ class RoleClient
             'header' => $response['header'] ?? [],
             'roles'  => $response['roles'] ?? [],
         ];
+    }
+
+    /**
+     * etcd gateway serializes the PermType enum as names ("READ"/"WRITE"/"READWRITE"); legacy ints still accepted.
+     */
+    private static function parsePermType(mixed $permType): int
+    {
+        if (is_numeric($permType)) {
+            return (int) $permType;
+        }
+        return ['READ' => 0, 'WRITE' => 1, 'READWRITE' => 2][$permType] ?? 0;
     }
 
     public function delete(string $role): array

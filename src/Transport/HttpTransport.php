@@ -76,48 +76,52 @@ class HttpTransport implements TransportInterface
     public function send(string $path, array $body): array
     {
         $bodyJson = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
-        $retries = max(0, (int) ($this->config['retry'] ?? 2));
-        $lastException = null;
 
-        for ($i = 0; $i <= $retries; $i++) {
-            $url = $this->endpointUrl($path);
+        return $this->withRetry($path, function (string $url) use ($bodyJson): array {
+            [$status, $responseBody] = $this->httpRequest($url, $bodyJson);
             try {
-                [$status, $responseBody] = $this->httpRequest($url, $bodyJson);
                 return $this->decodeResponse($status, $responseBody);
-            } catch (AuthException | EtcdException $e) {
-                throw $e;
             } catch (\JsonException $e) {
                 throw new EtcdException('Invalid JSON response from etcd: ' . substr($responseBody ?? '', 0, 200), previous: $e);
-            } catch (\Throwable $e) {
-                $lastException = $e;
-                if ($i < $retries) {
-                    usleep(100000 * ($i + 1));
-                }
             }
-        }
-
-        $last = $lastException ? get_class($lastException) . ': ' . substr($lastException->getMessage(), 0, 120) : 'unknown error';
-        throw new ConnectionException("Failed to connect to etcd after {$retries} retries ({$last})", previous: $lastException);
+        });
     }
 
     public function sendRaw(string $path): string
+    {
+        return $this->withRetry($path, function (string $url) use ($path): string {
+            [$status, $responseBody] = $this->httpRequest($url, '{}');
+            if ($status === 401) {
+                throw new AuthException('Authentication failed. Check credentials.');
+            }
+            if ($status >= 500) {
+                throw new EtcdException("Request failed with HTTP {$status}: {$path}", retryable: true);
+            }
+            if ($status >= 400) {
+                throw new EtcdException("Request failed with HTTP {$status}: {$path}");
+            }
+            return $responseBody;
+        });
+    }
+
+    private function withRetry(string $path, callable $fn): mixed
     {
         $retries = max(0, (int) ($this->config['retry'] ?? 2));
         $lastException = null;
 
         for ($i = 0; $i <= $retries; $i++) {
-            $url = $this->endpointUrl($path);
             try {
-                [$status, $responseBody] = $this->httpRequest($url, '{}');
-                if ($status === 401) {
-                    throw new AuthException('Authentication failed. Check credentials.');
-                }
-                if ($status >= 400) {
-                    throw new EtcdException("Request failed with HTTP {$status}: {$path}");
-                }
-                return $responseBody;
-            } catch (AuthException | EtcdException $e) {
+                return $fn($this->endpointUrl($path));
+            } catch (AuthException $e) {
                 throw $e;
+            } catch (EtcdException $e) {
+                if (!$e->isRetryable()) {
+                    throw $e;
+                }
+                $lastException = $e;
+                if ($i < $retries) {
+                    usleep(100000 * ($i + 1));
+                }
             } catch (\Throwable $e) {
                 $lastException = $e;
                 if ($i < $retries) {
@@ -152,7 +156,6 @@ class HttpTransport implements TransportInterface
             'http' => [
                 'method'  => 'POST',
                 'header'  => "Content-Type: application/json\r\n",
-                'content' => json_encode(['create_request' => $createRequest], JSON_THROW_ON_ERROR),
             ],
             'ssl' => $this->config['options']['ssl'] ?? ['verify_peer' => true],
         ];
@@ -178,7 +181,10 @@ class HttpTransport implements TransportInterface
                 continue;
             }
 
-            $status = isset($http_response_header[0]) && preg_match('#^HTTP/\S+\s+(\d+)#', $http_response_header[0], $m) ? (int) $m[1] : 0;
+            $status = 0;
+            if (isset($http_response_header[0]) && preg_match('#^HTTP/\S+\s+(\d+)#', $http_response_header[0], $m)) {
+                $status = (int) $m[1];
+            }
             if ($status === 401) {
                 fclose($stream);
                 throw new AuthException('Authentication failed. Check credentials.');
@@ -199,7 +205,11 @@ class HttpTransport implements TransportInterface
                     $write = null;
                     $except = null;
                     $ready = @stream_select($read, $write, $except, 0, 200000);
-                    if ($ready === false || $ready === 0) {
+                    if ($ready === false) {
+                        usleep(10000);
+                        continue;
+                    }
+                    if ($ready === 0) {
                         continue;
                     }
                     $chunk = fread($stream, 65536);
@@ -224,41 +234,42 @@ class HttpTransport implements TransportInterface
                             throw new EtcdException('Watch terminated by server: ' . ($data['error'] ?? 'unknown error'));
                         }
                         $result = $data['result'];
+                        if (!empty($result['canceled'])) {
+                            throw new EtcdException('Watch canceled by server' . (isset($result['compact_revision']) ? ' (compaction at revision ' . $result['compact_revision'] . ')' : ''));
+                        }
                         if (isset($result['header']['revision'])) {
                             $lastRevision = (int) $result['header']['revision'];
                         }
                         $events = [];
                         foreach ($result['events'] ?? [] as $event) {
-                            $type = 'PUT';
-                            if (isset($event['type']) && $event['type'] === 1) {
-                                $type = 'DELETE';
-                            }
+                            // etcd gateway emits enum names as strings ("DELETE") and omits PUT (0); accept legacy ints too
+                            $rawType = $event['type'] ?? 'PUT';
+                            $type = $rawType === 'DELETE' || $rawType === 1 ? 'DELETE' : 'PUT';
                             $kv = $event['kv'] ?? [];
                             if (isset($kv['key'])) {
-                                $d = base64_decode($kv['key'], true);
-                                $kv['key'] = $d !== false ? $d : $kv['key'];
+                                $kv['key'] = self::decodeB64($kv['key']);
                             }
                             if (isset($kv['value'])) {
-                                $d = base64_decode($kv['value'], true);
-                                $kv['value'] = $d !== false ? $d : $kv['value'];
+                                $kv['value'] = self::decodeB64($kv['value']);
                             }
                             $prevKv = null;
                             if (isset($event['prev_kv'])) {
                                 $prevKv = $event['prev_kv'];
                                 if (isset($prevKv['key'])) {
-                                    $d = base64_decode($prevKv['key'], true);
-                                    $prevKv['key'] = $d !== false ? $d : $prevKv['key'];
+                                    $prevKv['key'] = self::decodeB64($prevKv['key']);
                                 }
                                 if (isset($prevKv['value'])) {
-                                    $d = base64_decode($prevKv['value'], true);
-                                    $prevKv['value'] = $d !== false ? $d : $prevKv['value'];
+                                    $prevKv['value'] = self::decodeB64($prevKv['value']);
                                 }
                             }
                             $events[] = ['type' => $type, 'kv' => $kv, 'prev_kv' => $prevKv];
                         }
-                        if (!empty($events)) {
+                        if (!empty($events) || !empty($options['progressNotify'])) {
                             $onEvent($events);
                         }
+                    }
+                    if (strlen($buffer) > 10 * 1024 * 1024) {
+                        throw new EtcdException('Watch frame exceeds 10MB, aborting stream');
                     }
                 }
             } finally {
@@ -312,6 +323,13 @@ class HttpTransport implements TransportInterface
         return [(int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE), $raw];
     }
 
+    public function __destruct()
+    {
+        foreach ($this->curlHandles as $ch) {
+            curl_close($ch);
+        }
+    }
+
     private function getCurlHandle(string $url): \CurlHandle
     {
         $host = parse_url($url, PHP_URL_HOST) . ':' . (parse_url($url, PHP_URL_PORT) ?? '');
@@ -329,6 +347,11 @@ class HttpTransport implements TransportInterface
         if ($status === 401) {
             throw new AuthException('Authentication failed. Check credentials.');
         }
+        if ($status >= 500) {
+            $errData = json_decode($responseBody, true);
+            $message = is_array($errData) ? ($errData['message'] ?? $errData['error'] ?? "HTTP {$status}") : "HTTP {$status}: " . substr($responseBody, 0, 200);
+            throw new EtcdException("etcd server error: {$message}", retryable: true);
+        }
         if ($status >= 400) {
             $errData = json_decode($responseBody, true);
             if (is_array($errData)) {
@@ -345,6 +368,12 @@ class HttpTransport implements TransportInterface
     {
         $scheme = $this->config['scheme'] ?? 'http';
         return "{$scheme}://{$this->pickEndpoint()}{$path}";
+    }
+
+    private static function decodeB64(string $s): string
+    {
+        $decoded = base64_decode($s, true);
+        return $decoded !== false ? $decoded : $s;
     }
 
     private function pickEndpoint(): string

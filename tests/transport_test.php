@@ -76,7 +76,7 @@ $keys = array_column(array_column($events, 'kv'), 'key');
 assert($keys === ['k1', 'k2', 'k3', 'k4', 'k5'], 'keys out of order or lost: ' . json_encode($keys));
 $values = array_column(array_column($events, 'kv'), 'value');
 assert($values === ['v1', 'v2', 'v3', 'v4', 'v5'], 'values wrong: ' . json_encode($values));
-assert(array_column($events, 'type') === array_fill(0, 5, 'PUT'));
+assert(array_column($events, 'type') === ['PUT', 'PUT', 'DELETE', 'PUT', 'PUT']);
 
 // --- send via curl fallback (no PSR-18 client): raw JSON passthrough ---
 $result = $transport->send('/v3/kv/range', ['key' => base64_encode('a')]);

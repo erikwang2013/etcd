@@ -14,4 +14,13 @@ namespace Erikwang2013\Etcd\Exception;
 
 class EtcdException extends \RuntimeException
 {
+    public function __construct(string $message = '', int $code = 0, ?\Throwable $previous = null, private bool $retryable = false)
+    {
+        parent::__construct($message, $code, $previous);
+    }
+
+    public function isRetryable(): bool
+    {
+        return $this->retryable;
+    }
 }

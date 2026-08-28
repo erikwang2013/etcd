@@ -29,8 +29,8 @@ class RoleClientTest extends TestCase
         $transport = (new FakeTransport())->addResponse([
             'header' => ['cluster_id' => '1'],
             'perm' => [
-                ['permType' => '1', 'key' => base64_encode('foo'), 'range_end' => base64_encode('foo0')],
-                ['permType' => 2, 'key' => base64_encode('bar'), 'range_end' => ''],
+                ['permType' => 'WRITE', 'key' => base64_encode('foo'), 'range_end' => base64_encode('foo0')],
+                ['permType' => 'READWRITE', 'key' => base64_encode('bar'), 'range_end' => ''],
             ],
         ]);
         $client = new RoleClient($transport);
@@ -49,7 +49,7 @@ class RoleClientTest extends TestCase
     public function getCoercesPermTypeToInt(): void
     {
         $transport = (new FakeTransport())->addResponse([
-            'perm' => [['permType' => '2', 'key' => base64_encode('k'), 'range_end' => '']],
+            'perm' => [['permType' => 'READWRITE', 'key' => base64_encode('k'), 'range_end' => '']],
         ]);
         $perm = (new RoleClient($transport))->get('admin')['perm'][0];
 

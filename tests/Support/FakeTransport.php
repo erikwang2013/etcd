@@ -6,13 +6,7 @@ namespace Erikwang2013\Etcd\Tests\Support;
 
 use Erikwang2013\Etcd\Transport\TransportInterface;
 
-/**
- * Scripted fake TransportInterface for unit tests.
- *
- * Queue responses via addResponse(); send() returns them in FIFO order.
- * sendRaw() returns $rawResponse; watch() records its arguments and invokes
- * $onEvent with each entry of $watchEventBatches.
- */
+/** Scripted fake TransportInterface; responses are consumed in FIFO order. */
 class FakeTransport implements TransportInterface
 {
     /** @var list<array{0: string, 1: array}> */
