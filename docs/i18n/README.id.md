@@ -31,13 +31,34 @@ Klien etcd v3 untuk PHP —— transport ganda gRPC + HTTP, mencakup seluruh API
 
 - PHP >= 8.1
 - Server etcd v3.x
-- Klien HTTP PSR-18 + PSR-17 (wajib untuk transport HTTP, biasanya sudah tersedia di framework)
+- Cukup satu jalur HTTP: ext-curl, stream wrapper PHP (allow_url_fopen), atau klien PSR-18 Anda sendiri — dipilih otomatis, dengan pesan jelas bila tidak ada
 
 ## Instalasi
 
 ```bash
 composer require erikwang2013/etcd
 ```
+
+### PHP murni (tanpa framework)
+
+Tidak perlu framework, implementasi PSR-18, maupun ext-curl — bila ext-curl dimuat maka dipakai, jika tidak klien otomatis memakai stream wrapper bawaan PHP.
+
+```php
+<?php
+require __DIR__ . '/vendor/autoload.php';   // autoload Anda
+
+use Erikwang2013\Etcd\EtcdClient;
+
+$etcd = new EtcdClient(['endpoints' => ['127.0.0.1:2379']]);
+
+$etcd->kv()->put('/app/config', '{"debug":true}');
+echo $etcd->kv()->getOrFail('/app/config')['value'], "\n";
+
+// jalur yang sedang dipakai: curl / stream / none
+var_dump(Erikwang2013\Etcd\Transport\HttpTransport::detectDriver());
+```
+
+Paksa satu jalur dengan `'driver' => 'stream'` (default `auto`). Bila ketiganya tidak tersedia, permintaan melempar `ConnectionException` yang bisa ditangkap dan menjelaskan apa yang perlu diaktifkan.
 
 ## Mulai Cepat
 
@@ -78,8 +99,9 @@ $etcd->lease()->keepAlive($lease['ID']);
 $etcd = new EtcdClient([
     'endpoints' => ['192.168.1.10:2379', '192.168.1.11:2379'],  // 多节点
     'transport' => 'auto',  // auto（默认）| http | grpc
+    'driver'    => 'auto',  // auto (default) | curl | stream
     'scheme'    => 'http',  // http（默认）| https
-    'timeout'   => 5.0,     // 秒（需在 PSR-18 客户端配置）
+    'timeout'   => 5.0,     // detik
     'retry'     => 3,       // 连接失败重试次数
     'auth'      => [        // 可选，Basic Auth
         'user'     => 'root',
@@ -99,6 +121,7 @@ Tanpa konfigurasi eksplisit, variabel berikut dibaca otomatis:
 | `ETCD_TIMEOUT` | `5.0` | timeout request (detik) |
 | `ETCD_SCHEME` | `http` | http / https |
 | `ETCD_RETRY` | `2` | jumlah percobaan ulang koneksi |
+| `ETCD_DRIVER` | `auto` | jalur HTTP: auto / curl / stream |
 | `ETCD_USER` | — | nama pengguna etcd |
 | `ETCD_PASSWORD` | — | kata sandi etcd |
 
@@ -285,7 +308,7 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 
 | Mode | Status | Dependensi | Cocok untuk |
 |------|------|------|---------|
-| **HTTP** | Tersedia | PSR-18 + PSR-17 | tanpa dependensi ekstensi, langsung jalan |
+| **HTTP** | Tersedia | ext-curl / stream / PSR-18 (salah satu) | tanpa dependensi ekstensi, langsung jalan |
 | **gRPC** | Kerangka | ext-grpc + grpc/grpc + google/protobuf | throughput tinggi, streaming native |
 | **auto** | Default | deteksi otomatis | pakai gRPC bila tersedia, jika tidak HTTP |
 

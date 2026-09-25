@@ -31,13 +31,34 @@ PHP etcd v3 클라이언트 —— gRPC + HTTP 이중 전송으로 etcd v3의 �
 
 - PHP >= 8.1
 - etcd v3.x 서버
-- PSR-18 + PSR-17 HTTP 클라이언트 (HTTP 전송에 필요하며, 각 프레임워크가 대개 내장)
+- HTTP 경로 중 하나면 충분합니다: ext-curl, PHP 스트림 래퍼(allow_url_fopen), 또는 직접 준비한 PSR-18 클라이언트 — 자동 선택되며 모두 불가능하면 명확한 오류를 줍니다
 
 ## 설치
 
 ```bash
 composer require erikwang2013/etcd
 ```
+
+### 순수 PHP (프레임워크 없음)
+
+프레임워크도, PSR-18 구현도, ext-curl도 필요 없습니다. ext-curl이 로드되어 있으면 사용하고, 없으면 PHP 자체 스트림 래퍼로 자동 전환합니다.
+
+```php
+<?php
+require __DIR__ . '/vendor/autoload.php';   // 사용자의 autoload
+
+use Erikwang2013\Etcd\EtcdClient;
+
+$etcd = new EtcdClient(['endpoints' => ['127.0.0.1:2379']]);
+
+$etcd->kv()->put('/app/config', '{"debug":true}');
+echo $etcd->kv()->getOrFail('/app/config')['value'], "\n";
+
+// 실제 사용 중인 경로: curl / stream / none
+var_dump(Erikwang2013\Etcd\Transport\HttpTransport::detectDriver());
+```
+
+`'driver' => 'stream'`(기본값 `auto`)으로 경로를 강제할 수 있습니다. 세 가지 모두 불가능하면 활성화 방법을 설명하는 `ConnectionException`이 발생합니다.
 
 ## 빠른 시작
 
@@ -78,8 +99,9 @@ $etcd->lease()->keepAlive($lease['ID']);
 $etcd = new EtcdClient([
     'endpoints' => ['192.168.1.10:2379', '192.168.1.11:2379'],  // 다중 노드
     'transport' => 'auto',  // auto(기본) | http | grpc
+    'driver'    => 'auto',  // auto(기본) | curl | stream
     'scheme'    => 'http',  // http(기본) | https
-    'timeout'   => 5.0,     // 초 (PSR-18 클라이언트에 설정해야 함)
+    'timeout'   => 5.0,     // 초
     'retry'     => 3,       // 연결 실패 재시도 횟수
     'auth'      => [        // 선택, Basic Auth
         'user'     => 'root',
@@ -99,6 +121,7 @@ $etcd = new EtcdClient([
 | `ETCD_TIMEOUT` | `5.0` | 요청 타임아웃(초) |
 | `ETCD_SCHEME` | `http` | http / https |
 | `ETCD_RETRY` | `2` | 연결 재시도 횟수 |
+| `ETCD_DRIVER` | `auto` | HTTP 경로: auto / curl / stream |
 | `ETCD_USER` | — | etcd 사용자 이름 |
 | `ETCD_PASSWORD` | — | etcd 비밀번호 |
 
@@ -285,7 +308,7 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 
 | 모드 | 상태 | 의존성 | 적합한 경우 |
 |------|------|--------|-------------|
-| **HTTP** | 사용 가능 | PSR-18 + PSR-17 | 확장 의존성 없이 바로 사용 |
+| **HTTP** | 사용 가능 | ext-curl / stream / PSR-18 중 하나 | 확장 의존성 없이 바로 사용 |
 | **gRPC** | 골격 | ext-grpc + grpc/grpc + google/protobuf | 고성능, 네이티브 스트리밍 |
 | **auto** | 기본 | 자동 감지 | gRPC가 있으면 gRPC, 없으면 HTTP |
 

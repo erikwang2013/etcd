@@ -155,4 +155,58 @@ class HttpTransportTest extends TestCase
         $this->expectExceptionMessage('HTTP 500');
         $transport->sendRaw('/v3/lease/leases');
     }
+
+    // --- native driver selection: curl, then PHP's stream wrapper, then advice ---
+
+    public function testDetectDriverPrefersCurlWhenAvailable(): void
+    {
+        self::assertSame(HttpTransport::DRIVER_CURL, HttpTransport::detectDriver(true, true));
+        self::assertSame(HttpTransport::DRIVER_CURL, HttpTransport::detectDriver(true, false));
+    }
+
+    public function testDetectDriverFallsBackToTheStreamWrapper(): void
+    {
+        self::assertSame(HttpTransport::DRIVER_STREAM, HttpTransport::detectDriver(false, true));
+    }
+
+    public function testDetectDriverReportsNoneWhenNeitherIsAvailable(): void
+    {
+        self::assertSame('none', HttpTransport::detectDriver(false, false));
+    }
+
+    public function testDetectDriverReadsTheLiveRuntimeByDefault(): void
+    {
+        $expected = \function_exists('curl_init')
+            ? HttpTransport::DRIVER_CURL
+            : (ini_get('allow_url_fopen') ? HttpTransport::DRIVER_STREAM : 'none');
+
+        self::assertSame($expected, HttpTransport::detectDriver());
+    }
+
+    public function testUnknownDriverValueFallsBackToAutoDetection(): void
+    {
+        self::assertSame(HttpTransport::detectDriver(), $this->transport(['driver' => 'nope'])->driver());
+    }
+
+    public function testExplicitCurlDriverIsAcceptedOrExplained(): void
+    {
+        if (\function_exists('curl_init')) {
+            self::assertSame(HttpTransport::DRIVER_CURL, $this->transport(['driver' => 'curl'])->driver());
+            return;
+        }
+        $this->expectException(ConnectionException::class);
+        $this->expectExceptionMessage('ext-curl is not loaded');
+        $this->transport(['driver' => 'curl'])->driver();
+    }
+
+    public function testExplicitStreamDriverNeedsAllowUrlFopen(): void
+    {
+        if (!ini_get('allow_url_fopen')) {
+            $this->expectException(ConnectionException::class);
+            $this->expectExceptionMessage('allow_url_fopen is disabled');
+            $this->transport(['driver' => 'stream'])->driver();
+            return;
+        }
+        self::assertSame(HttpTransport::DRIVER_STREAM, $this->transport(['driver' => 'stream'])->driver());
+    }
 }

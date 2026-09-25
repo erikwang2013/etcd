@@ -31,13 +31,34 @@ Cliente PHP para etcd v3 —— transporte dual gRPC + HTTP, cubre toda la API d
 
 - PHP >= 8.1
 - Servidor etcd v3.x
-- Cliente HTTP PSR-18 + PSR-17 (necesario para el transporte HTTP; la mayoría de los frameworks ya lo incluye)
+- Basta con una vía HTTP: ext-curl, el envoltorio de flujos de PHP (allow_url_fopen) o tu propio cliente PSR-18 — se elige automáticamente y avisa con claridad si no hay ninguna
 
 ## Instalación
 
 ```bash
 composer require erikwang2013/etcd
 ```
+
+### PHP puro (sin framework)
+
+No hace falta framework, ni implementación PSR-18, ni ext-curl: si ext-curl está cargado se usa, y si no el cliente recurre al envoltorio de flujos de PHP.
+
+```php
+<?php
+require __DIR__ . '/vendor/autoload.php';   // tu autoload
+
+use Erikwang2013\Etcd\EtcdClient;
+
+$etcd = new EtcdClient(['endpoints' => ['127.0.0.1:2379']]);
+
+$etcd->kv()->put('/app/config', '{"debug":true}');
+echo $etcd->kv()->getOrFail('/app/config')['value'], "\n";
+
+// qué ruta se está usando: curl / stream / none
+var_dump(Erikwang2013\Etcd\Transport\HttpTransport::detectDriver());
+```
+
+Fuerza una ruta con `'driver' => 'stream'` (por defecto `auto`). Si no hay ninguna de las tres, la petición lanza una `ConnectionException` capturable que explica qué activar.
 
 ## Inicio rápido
 
@@ -78,8 +99,9 @@ $etcd->lease()->keepAlive($lease['ID']);
 $etcd = new EtcdClient([
     'endpoints' => ['192.168.1.10:2379', '192.168.1.11:2379'],  // varios nodos
     'transport' => 'auto',  // auto (por defecto) | http | grpc
+    'driver'    => 'auto',  // auto (por defecto) | curl | stream
     'scheme'    => 'http',  // http (por defecto) | https
-    'timeout'   => 5.0,     // segundos (se configura en el cliente PSR-18)
+    'timeout'   => 5.0,     // segundos
     'retry'     => 3,       // reintentos si falla la conexión
     'auth'      => [        // opcional, Basic Auth
         'user'     => 'root',
@@ -99,6 +121,7 @@ Si no se pasa configuración, se leen automáticamente las variables de entorno:
 | `ETCD_TIMEOUT` | `5.0` | Timeout de petición (segundos) |
 | `ETCD_SCHEME` | `http` | http / https |
 | `ETCD_RETRY` | `2` | Número de reintentos de conexión |
+| `ETCD_DRIVER` | `auto` | vía HTTP: auto / curl / stream |
 | `ETCD_USER` | — | Usuario de etcd |
 | `ETCD_PASSWORD` | — | Contraseña de etcd |
 
@@ -285,7 +308,7 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 
 | Modo | Estado | Dependencias | Cuándo usarlo |
 |------|------|------|---------|
-| **HTTP** | Disponible | PSR-18 + PSR-17 | Cero dependencias de extensiones, funciona al momento |
+| **HTTP** | Disponible | ext-curl / flujos / PSR-18 (cualquiera) | Cero dependencias de extensiones, funciona al momento |
 | **gRPC** | Esqueleto | ext-grpc + grpc/grpc + google/protobuf | Alto rendimiento, streaming nativo |
 | **auto** | Por defecto | Detección automática | Usa gRPC si está disponible, si no HTTP |
 

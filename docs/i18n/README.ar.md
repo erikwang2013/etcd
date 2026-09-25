@@ -31,13 +31,34 @@
 
 - PHP >= 8.1
 - خادم etcd v3.x
-- عميل HTTP متوافق مع PSR-18 + PSR-17 (ضروري لنقل HTTP، وتوفره الأطر عادةً)
+- يكفي أحد مسارات HTTP: ext-curl أو غلاف التدفقات في PHP (allow_url_fopen) أو عميل PSR-18 خاص بك — يُختار تلقائيًا، مع رسالة واضحة عند عدم توفر أي منها
 
 ## التثبيت
 
 ```bash
 composer require erikwang2013/etcd
 ```
+
+### PHP الخام (بدون إطار عمل)
+
+لا حاجة إلى إطار عمل ولا إلى تطبيق PSR-18 ولا إلى ext-curl — يُستخدم ext-curl عند تحميله، وإلا يتحول العميل تلقائيًا إلى غلاف التدفقات في PHP.
+
+```php
+<?php
+require __DIR__ . '/vendor/autoload.php';   // مسار autoload الخاص بك
+
+use Erikwang2013\Etcd\EtcdClient;
+
+$etcd = new EtcdClient(['endpoints' => ['127.0.0.1:2379']]);
+
+$etcd->kv()->put('/app/config', '{"debug":true}');
+echo $etcd->kv()->getOrFail('/app/config')['value'], "\n";
+
+// المسار المستخدم فعليًا: curl / stream / none
+var_dump(Erikwang2013\Etcd\Transport\HttpTransport::detectDriver());
+```
+
+لفرض مسار معيّن استخدم `'driver' => 'stream'` (الافتراضي `auto`). وإذا لم يتوفر أي من الثلاثة، يرفع الطلب استثناء `ConnectionException` يمكن التقاطه ويوضح ما يجب تمكينه.
 
 ## البدء السريع
 
@@ -78,8 +99,9 @@ $etcd->lease()->keepAlive($lease['ID']);
 $etcd = new EtcdClient([
     'endpoints' => ['192.168.1.10:2379', '192.168.1.11:2379'],  // عُقد متعددة
     'transport' => 'auto',  // auto(افتراضي)| http | grpc
+    'driver'    => 'auto',  // auto (الافتراضي) | curl | stream
     'scheme'    => 'http',  // http(افتراضي)| https
-    'timeout'   => 5.0,     // ثانية (تُضبط في عميل PSR-18)
+    'timeout'   => 5.0,     // ثوانٍ
     'retry'     => 3,       // عدد محاولات إعادة الاتصال
     'auth'      => [        // اختياري، Basic Auth
         'user'     => 'root',
@@ -99,6 +121,7 @@ $etcd = new EtcdClient([
 | `ETCD_TIMEOUT` | `5.0` | مهلة الطلب (بالثواني) |
 | `ETCD_SCHEME` | `http` | http / https |
 | `ETCD_RETRY` | `2` | عدد محاولات إعادة الاتصال |
+| `ETCD_DRIVER` | `auto` | مسار HTTP: auto / curl / stream |
 | `ETCD_USER` | — | اسم مستخدم etcd |
 | `ETCD_PASSWORD` | — | كلمة مرور etcd |
 
@@ -285,7 +308,7 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 
 | الوضع | الحالة | التبعيات | حالة الاستخدام |
 |------|------|------|---------|
-| **HTTP** | متاح | PSR-18 + PSR-17 | بلا اعتماد على أي امتداد، وجاهز فورًا |
+| **HTTP** | متاح | ext-curl / stream / PSR-18 (أي واحد) | بلا اعتماد على أي امتداد، وجاهز فورًا |
 | **gRPC** | هيكل | ext-grpc + grpc/grpc + google/protobuf | أداء عالٍ وبث أصلي |
 | **auto** | افتراضي | اكتشاف تلقائي | gRPC إن توفر، وإلا HTTP |
 

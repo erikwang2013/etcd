@@ -46,7 +46,7 @@
   "arch.grpc.sub2": "ext-grpc + grpc/grpc + google/protobuf",
   "arch.http.badge": "तैयार",
   "arch.http.sub1": "etcd का अंतर्निहित gRPC-gateway, HTTP पर JSON",
-  "arch.http.sub2": "PSR-18 Client + PSR-17 Factory",
+  "arch.http.sub2": "cURL / stream / PSR-18",
   "arch.kv.sub": "put / get / getByPrefix / txn / compact",
   "arch.lease.sub": "grant / keepAlive / revoke / TTL",
   "arch.maint.sub": "status / alarm / defrag / snapshot",

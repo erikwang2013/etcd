@@ -108,7 +108,7 @@ T = {
     "arch.b4": "传输层",
     "arch.sel.body": "transport = grpc → GrpcTransport ｜ http → HttpTransport ｜ auto → 检测 ext-grpc 与 Grpc\\BaseStub，二者齐备才走 gRPC，否则回退 HTTP",
     "arch.http.sub1": "etcd 内置 gRPC-gateway，JSON over HTTP",
-    "arch.http.sub2": "PSR-18 Client + PSR-17 Factory",
+    "arch.http.sub2": "cURL / stream / PSR-18",
     "arch.http.badge": "可用",
     "arch.grpc.sub1": "Grpc\\Channel 复用，原生流式",
     "arch.grpc.sub2": "ext-grpc + grpc/grpc + google/protobuf",

@@ -48,13 +48,34 @@ PHP etcd v3 客户端 —— gRPC + HTTP 双模传输，覆盖 etcd v3 全部 AP
 
 - PHP >= 8.1
 - etcd v3.x 服务端
-- PSR-18 + PSR-17 HTTP 客户端（HTTP 传输必需，各框架通常自带）
+- HTTP 通道任选其一即可：ext-curl、PHP 流封装（allow_url_fopen）、或自备 PSR-18 客户端 —— 自动选择，都不可用时给出明确提示
 
 ## 安装
 
 ```bash
 composer require erikwang2013/etcd
 ```
+
+### 裸 PHP（无框架）
+
+不需要框架、不需要 PSR-18 实现、也不需要 ext-curl —— 加载了 ext-curl 就用它，缺失时自动回退到 PHP 自带的流封装。
+
+```php
+<?php
+require __DIR__ . '/vendor/autoload.php';   // 你的 autoload
+
+use Erikwang2013\Etcd\EtcdClient;
+
+$etcd = new EtcdClient(['endpoints' => ['127.0.0.1:2379']]);
+
+$etcd->kv()->put('/app/config', '{"debug":true}');
+echo $etcd->kv()->getOrFail('/app/config')['value'], "\n";
+
+// 当前实际使用哪条通道：curl / stream / none
+var_dump(Erikwang2013\Etcd\Transport\HttpTransport::detectDriver());
+```
+
+强制指定通道用 `'driver' => 'stream'`（默认 `auto`）；三条通道都不可用时，请求抛出可捕获的 `ConnectionException` 并说明如何启用。
 
 ## 快速开始
 
@@ -95,8 +116,9 @@ $etcd->lease()->keepAlive($lease['ID']);
 $etcd = new EtcdClient([
     'endpoints' => ['192.168.1.10:2379', '192.168.1.11:2379'],  // 多节点
     'transport' => 'auto',  // auto（默认）| http | grpc
+    'driver'    => 'auto',  // auto（默认）| curl | stream
     'scheme'    => 'http',  // http（默认）| https
-    'timeout'   => 5.0,     // 秒（需在 PSR-18 客户端配置）
+    'timeout'   => 5.0,     // 秒
     'retry'     => 3,       // 连接失败重试次数
     'auth'      => [        // 可选，Basic Auth
         'user'     => 'root',
@@ -116,6 +138,7 @@ $etcd = new EtcdClient([
 | `ETCD_TIMEOUT` | `5.0` | 请求超时（秒） |
 | `ETCD_SCHEME` | `http` | http / https |
 | `ETCD_RETRY` | `2` | 连接重试次数 |
+| `ETCD_DRIVER` | `auto` | HTTP 通道：auto / curl / stream |
 | `ETCD_USER` | — | etcd 用户名 |
 | `ETCD_PASSWORD` | — | etcd 密码 |
 
@@ -302,7 +325,7 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 
 | 模式 | 状态 | 依赖 | 适用场景 |
 |------|------|------|---------|
-| **HTTP** | 可用 | PSR-18 + PSR-17 | 零扩展依赖，即刻可用 |
+| **HTTP** | 可用 | ext-curl / 流封装 / PSR-18 任选其一 | 零扩展依赖，即刻可用 |
 | **gRPC** | 骨架 | ext-grpc + grpc/grpc + google/protobuf | 高性能、原生流式 |
 | **auto** | 默认 | 自动检测 | 有 gRPC 则用 gRPC，否则 HTTP |
 

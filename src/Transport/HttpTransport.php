@@ -21,6 +21,11 @@ use Psr\Http\Message\StreamFactoryInterface;
 
 class HttpTransport implements TransportInterface
 {
+    /** Pick whatever the runtime has: cURL, then the stream wrapper, then fail with advice. */
+    public const DRIVER_AUTO = 'auto';
+    public const DRIVER_CURL = 'curl';
+    public const DRIVER_STREAM = 'stream';
+
     private array $endpoints;
     private array $config;
     private ?ClientInterface $httpClient = null;
@@ -288,6 +293,54 @@ class HttpTransport implements TransportInterface
     }
 
     /**
+     * Which native HTTP driver this runtime can use.
+     *
+     * The two flags are injectable so the choice can be tested without
+     * disabling a real extension.
+     *
+     * @return string self::DRIVER_CURL, self::DRIVER_STREAM, or 'none'
+     */
+    public static function detectDriver(?bool $hasCurl = null, ?bool $hasStreams = null): string
+    {
+        $hasCurl ??= \function_exists('curl_init');
+        $hasStreams ??= (bool) ini_get('allow_url_fopen');
+
+        if ($hasCurl) {
+            return self::DRIVER_CURL;
+        }
+        if ($hasStreams) {
+            return self::DRIVER_STREAM;
+        }
+
+        return 'none';
+    }
+
+    /**
+     * Resolve the configured driver, honouring an explicit `driver` override
+     * ('curl' or 'stream') and reporting clearly when it is not available.
+     * Public so callers can log which path is in use.
+     */
+    public function driver(): string
+    {
+        $preferred = $this->config['driver'] ?? self::DRIVER_AUTO;
+
+        if ($preferred === self::DRIVER_CURL) {
+            if (!\function_exists('curl_init')) {
+                throw new ConnectionException('Transport driver "curl" requested but ext-curl is not loaded.');
+            }
+            return self::DRIVER_CURL;
+        }
+        if ($preferred === self::DRIVER_STREAM) {
+            if (!ini_get('allow_url_fopen')) {
+                throw new ConnectionException('Transport driver "stream" requested but allow_url_fopen is disabled.');
+            }
+            return self::DRIVER_STREAM;
+        }
+
+        return self::detectDriver();
+    }
+
+    /**
      * @return array{0: int, 1: string} [HTTP status, response body]
      */
     private function httpRequest(string $url, string $bodyJson): array
@@ -303,6 +356,21 @@ class HttpTransport implements TransportInterface
             return [$response->getStatusCode(), (string) $response->getBody()];
         }
 
+        return match ($this->driver()) {
+            self::DRIVER_CURL   => $this->curlRequest($url, $bodyJson),
+            self::DRIVER_STREAM => $this->streamRequest($url, $bodyJson),
+            default             => throw new ConnectionException(
+                'No HTTP transport available: load ext-curl, set allow_url_fopen=1, '
+                . 'or pass a PSR-18 client to setHttpClient().'
+            ),
+        };
+    }
+
+    /**
+     * @return array{0: int, 1: string} [HTTP status, response body]
+     */
+    private function curlRequest(string $url, string $bodyJson): array
+    {
         $ch = $this->getCurlHandle($url);
         $headers = ['Content-Type: application/json'];
         if ($this->credentials !== '') {
@@ -318,9 +386,55 @@ class HttpTransport implements TransportInterface
         ]);
         $raw = curl_exec($ch);
         if ($raw === false) {
-            throw new \RuntimeException('cURL error: ' . curl_error($ch));
+            throw new ConnectionException('cURL error: ' . curl_error($ch), retryable: true);
         }
         return [(int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE), $raw];
+    }
+
+    /**
+     * Native path for runtimes without ext-curl: PHP's own HTTP stream wrapper.
+     * Same contract as curlRequest() — status plus raw body, errors as
+     * ConnectionException so withRetry() can treat them as transport failures.
+     *
+     * @return array{0: int, 1: string} [HTTP status, response body]
+     */
+    private function streamRequest(string $url, string $bodyJson): array
+    {
+        $headers = "Content-Type: application/json\r\n";
+        if ($this->credentials !== '') {
+            $headers .= 'Authorization: Basic ' . $this->credentials . "\r\n";
+        }
+
+        $context = stream_context_create([
+            'http' => [
+                'method'        => 'POST',
+                'header'        => $headers,
+                'content'       => $bodyJson,
+                'timeout'       => (float) ($this->config['timeout'] ?? 5.0),
+                // 4xx/5xx carry an etcd error message in the body; capture it
+                // instead of letting file_get_contents() return false.
+                'ignore_errors' => true,
+            ],
+            'ssl' => $this->config['options']['ssl'] ?? ['verify_peer' => true],
+        ]);
+
+        $raw = @file_get_contents($url, false, $context);
+        if ($raw === false) {
+            throw new ConnectionException(
+                'Stream request to ' . $url . ' failed: ' . (error_get_last()['message'] ?? 'unknown error'),
+                retryable: true
+            );
+        }
+
+        $status = 0;
+        foreach ($http_response_header ?? [] as $header) {
+            if (preg_match('#^HTTP/\S+\s+(\d+)#', $header, $m)) {
+                $status = (int) $m[1];
+                break;
+            }
+        }
+
+        return [$status, $raw];
     }
 
     public function __destruct()

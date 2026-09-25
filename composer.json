@@ -1,6 +1,6 @@
 {
     "name": "erikwang2013/etcd",
-    "description": "PHP etcd v3 client with gRPC + HTTP dual transport and the full v3 API (KV, Watch, Lease, Auth, Cluster, Maintenance). First-class Laravel, Hyperf, ThinkPHP and Webman adapters.",
+    "description": "PHP etcd v3 client with gRPC + HTTP dual transport and the full v3 API (KV, Watch, Lease, Auth, Cluster, Maintenance). Runs on plain PHP: no framework, no PSR-18 implementation and no ext-curl required. Laravel, Hyperf, ThinkPHP and Webman adapters included.",
     "type": "library",
     "license": "MIT",
     "authors": [
@@ -16,16 +16,27 @@
         "issues": "https://github.com/erikwang2013/etcd/issues"
     },
     "homepage": "https://erik.xyz",
-    "keywords": ["etcd", "etcd-client", "etcd-v3", "laravel", "hyperf", "thinkphp", "webman"],
+    "keywords": [
+        "etcd",
+        "etcd-client",
+        "etcd-v3",
+        "laravel",
+        "hyperf",
+        "thinkphp",
+        "webman"
+    ],
     "require": {
-        "php": ">=8.0",
+        "php": ">=8.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0",
         "psr/http-client": "^1.0",
         "psr/http-factory": "^1.0"
     },
-    "require-dev": {
-        "phpunit/phpunit": "^11.0"
-    },
     "suggest": {
+        "psr/http-client": "For the PSR-18 transport path via HttpTransport::setHttpClient(). Without it the client uses ext-curl, or PHP's stream wrapper when ext-curl is absent.",
+        "psr/http-factory": "PSR-17 request/stream factories, used together with psr/http-client.",
+        "ext-curl": "Fastest HTTP driver (default when loaded). Without it the client falls back to the stream wrapper.",
         "grpc/grpc": "For native gRPC transport (better performance, full watch streaming)",
         "google/protobuf": "For protobuf message support (required by gRPC transport)"
     },
@@ -41,8 +52,12 @@
     },
     "extra": {
         "laravel": {
-            "providers": ["Erikwang2013\\Etcd\\Adapter\\Laravel\\ServiceProvider"],
-            "aliases": {"Etcd": "Erikwang2013\\Etcd\\Adapter\\Laravel\\Facade"}
+            "providers": [
+                "Erikwang2013\\Etcd\\Adapter\\Laravel\\ServiceProvider"
+            ],
+            "aliases": {
+                "Etcd": "Erikwang2013\\Etcd\\Adapter\\Laravel\\Facade"
+            }
         },
         "hyperf": {
             "config": "Erikwang2013\\Etcd\\Adapter\\Hyperf\\ConfigProvider"

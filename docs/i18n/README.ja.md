@@ -31,13 +31,34 @@ PHP etcd v3 クライアント —— gRPC + HTTP のデュアルトランスポ
 
 - PHP >= 8.1
 - etcd v3.x サーバ
-- PSR-18 + PSR-17 HTTP クライアント（HTTP トランスポートで必須。多くのフレームワークは同梱済み）
+- HTTP 経路はいずれか 1 つで十分です: ext-curl、PHP のストリームラッパー（allow_url_fopen）、自前の PSR-18 クライアント — 自動選択され、どれも使えない場合は明確なエラーを返します
 
 ## インストール
 
 ```bash
 composer require erikwang2013/etcd
 ```
+
+### 素の PHP（フレームワークなし）
+
+フレームワークも PSR-18 実装も ext-curl も不要です。ext-curl が読み込まれていればそれを使い、なければ PHP 標準のストリームラッパーに自動で切り替わります。
+
+```php
+<?php
+require __DIR__ . '/vendor/autoload.php';   // あなたの autoload
+
+use Erikwang2013\Etcd\EtcdClient;
+
+$etcd = new EtcdClient(['endpoints' => ['127.0.0.1:2379']]);
+
+$etcd->kv()->put('/app/config', '{"debug":true}');
+echo $etcd->kv()->getOrFail('/app/config')['value'], "\n";
+
+// 実際に使われている経路: curl / stream / none
+var_dump(Erikwang2013\Etcd\Transport\HttpTransport::detectDriver());
+```
+
+経路を固定するには `'driver' => 'stream'`（既定は `auto`）。3 つとも使えない場合、リクエストは捕捉可能な `ConnectionException` を投げ、何を有効にすべきかを示します。
 
 ## クイックスタート
 
@@ -78,8 +99,9 @@ $etcd->lease()->keepAlive($lease['ID']);
 $etcd = new EtcdClient([
     'endpoints' => ['192.168.1.10:2379', '192.168.1.11:2379'],  // 複数ノード
     'transport' => 'auto',  // auto（既定）| http | grpc
+    'driver'    => 'auto',  // auto（既定）| curl | stream
     'scheme'    => 'http',  // http（既定）| https
-    'timeout'   => 5.0,     // 秒（PSR-18 クライアントで設定）
+    'timeout'   => 5.0,     // 秒
     'retry'     => 3,       // 接続失敗時のリトライ回数
     'auth'      => [        // 任意、Basic Auth
         'user'     => 'root',
@@ -99,6 +121,7 @@ $etcd = new EtcdClient([
 | `ETCD_TIMEOUT` | `5.0` | リクエストタイムアウト（秒） |
 | `ETCD_SCHEME` | `http` | http / https |
 | `ETCD_RETRY` | `2` | 接続リトライ回数 |
+| `ETCD_DRIVER` | `auto` | HTTP 経路: auto / curl / stream |
 | `ETCD_USER` | — | etcd ユーザ名 |
 | `ETCD_PASSWORD` | — | etcd パスワード |
 
@@ -285,7 +308,7 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 
 | モード | 状態 | 依存 | 用途 |
 |------|------|------|---------|
-| **HTTP** | 利用可 | PSR-18 + PSR-17 | 拡張機能への依存ゼロ、すぐ使える |
+| **HTTP** | 利用可 | ext-curl / stream / PSR-18 のいずれか | 拡張機能への依存ゼロ、すぐ使える |
 | **gRPC** | スケルトン | ext-grpc + grpc/grpc + google/protobuf | 高スループット、ネイティブストリーミング |
 | **auto** | 既定 | 自動検出 | gRPC があれば gRPC、なければ HTTP |
 

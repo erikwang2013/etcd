@@ -31,13 +31,34 @@ PHP etcd v3 Client — gRPC + HTTP als dualer Transport, vollständige Abdeckung
 
 - PHP >= 8.1
 - etcd v3.x-Server
-- PSR-18 + PSR-17 HTTP-Client (für den HTTP-Transport erforderlich; die meisten Frameworks bringen einen mit)
+- Einer der HTTP-Pfade genügt: ext-curl, PHPs Stream-Wrapper (allow_url_fopen) oder ein eigener PSR-18-Client — automatisch gewählt, mit klarer Meldung, wenn keiner verfügbar ist
 
 ## Installation
 
 ```bash
 composer require erikwang2013/etcd
 ```
+
+### Reines PHP (ohne Framework)
+
+Weder Framework noch PSR-18-Implementierung noch ext-curl nötig — ist ext-curl geladen, wird es genutzt, sonst wechselt der Client automatisch auf den Stream-Wrapper von PHP.
+
+```php
+<?php
+require __DIR__ . '/vendor/autoload.php';   // dein Autoload
+
+use Erikwang2013\Etcd\EtcdClient;
+
+$etcd = new EtcdClient(['endpoints' => ['127.0.0.1:2379']]);
+
+$etcd->kv()->put('/app/config', '{"debug":true}');
+echo $etcd->kv()->getOrFail('/app/config')['value'], "\n";
+
+// welcher Pfad gerade genutzt wird: curl / stream / none
+var_dump(Erikwang2013\Etcd\Transport\HttpTransport::detectDriver());
+```
+
+Erzwingen lässt sich ein Pfad mit `'driver' => 'stream'` (Standard `auto`). Ist keiner der drei verfügbar, wirft die Anfrage eine fangbare `ConnectionException`, die erklärt, was zu aktivieren ist.
 
 ## Schnellstart
 
@@ -78,8 +99,9 @@ $etcd->lease()->keepAlive($lease['ID']);
 $etcd = new EtcdClient([
     'endpoints' => ['192.168.1.10:2379', '192.168.1.11:2379'],  // mehrere Knoten
     'transport' => 'auto',  // auto (Standard) | http | grpc
+    'driver'    => 'auto',  // auto (Standard) | curl | stream
     'scheme'    => 'http',  // http (Standard) | https
-    'timeout'   => 5.0,     // Sekunden (im PSR-18-Client zu konfigurieren)
+    'timeout'   => 5.0,     // Sekunden
     'retry'     => 3,       // Anzahl Wiederholungen bei Verbindungsfehlern
     'auth'      => [        // optional, Basic Auth
         'user'     => 'root',
@@ -99,6 +121,7 @@ Ohne übergebene Konfiguration werden die Umgebungsvariablen automatisch gelesen
 | `ETCD_TIMEOUT` | `5.0` | Request-Timeout (Sekunden) |
 | `ETCD_SCHEME` | `http` | http / https |
 | `ETCD_RETRY` | `2` | Anzahl der Verbindungswiederholungen |
+| `ETCD_DRIVER` | `auto` | HTTP-Pfad: auto / curl / stream |
 | `ETCD_USER` | — | etcd-Benutzername |
 | `ETCD_PASSWORD` | — | etcd-Passwort |
 
@@ -285,7 +308,7 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 
 | Modus | Status | Abhängigkeit | Geeignet für |
 |------|------|------|---------|
-| **HTTP** | verfügbar | PSR-18 + PSR-17 | keine Extension nötig, sofort einsatzbereit |
+| **HTTP** | verfügbar | ext-curl / Streams / PSR-18 (eines davon) | keine Extension nötig, sofort einsatzbereit |
 | **gRPC** | Skelett | ext-grpc + grpc/grpc + google/protobuf | hoher Durchsatz, natives Streaming |
 | **auto** | Standard | automatische Erkennung | gRPC wenn vorhanden, sonst HTTP |
 

@@ -53,6 +53,12 @@ switch ($path) {
         ]);
         exit;
 
+    case '/v3/auth/authenticate':
+        http_response_code(401);
+        header('Content-Type: application/json');
+        echo json_encode(['error' => 'invalid auth token']);
+        exit;
+
     case '/v3/maintenance/snapshot':
         header('Content-Type: application/octet-stream');
         echo 'SNAPSHOT-BINARY-DATA-123';

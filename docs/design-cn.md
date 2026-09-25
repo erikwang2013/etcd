@@ -175,7 +175,9 @@ interface TransportInterface {
 
 - **通信协议：** 通过 etcd 内置的 gRPC-gateway 发送 JSON HTTP 请求
 - **端点路径：** `/v3/kv/put`, `/v3/kv/range`, `/v3/watch` 等
-- **依赖：** PSR-18 `ClientInterface` + PSR-17 `RequestFactoryInterface` + `StreamFactoryInterface`
+- **HTTP 通道（自动降级）：** ext-curl → PHP 流封装（`file_get_contents` + `stream_context`）→ PSR-18 `ClientInterface` + PSR-17 工厂。
+  三者都不可用时抛 `ConnectionException` 并说明启用方式；`config['driver']` 可强制指定 `curl` / `stream`。
+  传输层失败标记为 `retryable`（重试），配置类错误（如强制了未加载的驱动）不重试。
 - **认证：** HTTP Basic Auth 头（`Authorization: Basic <base64>`）
 - **重试：** 连接级失败自动重试（默认 2 次，间隔 100ms），认证和服务器错误不重试
 - **Watch：** `fopen()` + `stream_context_create` 分块读取，非阻塞 I/O，断线自动重连
@@ -242,6 +244,7 @@ RuntimeException
 [
     'endpoints' => ['127.0.0.1:2379'],  // 支持多节点
     'transport' => 'auto',               // auto | http | grpc
+    'driver'    => 'auto',               // auto | curl | stream（HTTP 通道）
     'timeout'   => 5.0,                  // 秒
     'retry'     => 2,                    // 连接失败重试次数
     'auth'      => [
@@ -255,7 +258,7 @@ RuntimeException
 ]
 ```
 
-环境变量：`ETCD_ENDPOINTS` | `ETCD_TRANSPORT` | `ETCD_TIMEOUT` | `ETCD_RETRY` | `ETCD_USER` | `ETCD_PASSWORD`
+环境变量：`ETCD_ENDPOINTS` | `ETCD_TRANSPORT` | `ETCD_DRIVER` | `ETCD_TIMEOUT` | `ETCD_RETRY` | `ETCD_USER` | `ETCD_PASSWORD`
 
 ## 依赖关系
 

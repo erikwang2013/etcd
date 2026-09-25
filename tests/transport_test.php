@@ -13,7 +13,9 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use Erikwang2013\Etcd\EtcdClient;
+use Erikwang2013\Etcd\Exception\AuthException;
 use Erikwang2013\Etcd\Exception\ConnectionException;
+use Erikwang2013\Etcd\Exception\EtcdException;
 use Erikwang2013\Etcd\Transport\HttpTransport;
 
 // --- unit: prefixToRangeEnd all-0xFF prefix ---
@@ -92,5 +94,38 @@ assert(($kv['kvs'][0]['value'] ?? null) === 'b');
 // --- sendRaw via curl fallback ---
 assert($transport->sendRaw('/v3/maintenance/snapshot') === 'SNAPSHOT-BINARY-DATA-123');
 
+// --- stream driver: same paths without curl, via PHP's http wrapper ---
+$stream = new HttpTransport(
+    ["127.0.0.1:{$port}"],
+    ['scheme' => 'http', 'timeout' => 3.0, 'retry' => 0, 'driver' => 'stream']
+);
+
+$result = $stream->send('/v3/kv/range', ['key' => base64_encode('a')]);
+assert(($result['kvs'][0]['key'] ?? null) === base64_encode('a'), 'stream send() decode failed: ' . json_encode($result));
+assert($stream->sendRaw('/v3/maintenance/snapshot') === 'SNAPSHOT-BINARY-DATA-123', 'stream sendRaw() failed');
+
+// status codes must map to the same typed exceptions as the curl path
+try {
+    $stream->send('/v3/does-not-exist', []);
+    assert(false, 'stream send() should raise on 404');
+} catch (EtcdException $e) {
+    assert(str_contains($e->getMessage(), '404'), 'stream 404 message wrong: ' . $e->getMessage());
+}
+
+try {
+    $stream->send('/v3/auth/authenticate', []);
+    assert(false, 'stream send() should raise AuthException on 401');
+} catch (AuthException) {
+    // expected
+}
+
+// and the same 401 through the full client
+$client = new EtcdClient(['endpoints' => ["127.0.0.1:{$port}"], 'scheme' => 'http', 'timeout' => 3.0, 'retry' => 0, 'driver' => 'stream']);
+$range = $client->kv()->get('a');
+assert(($range['kvs'][0]['value'] ?? null) === 'b', 'EtcdClient over stream driver failed');
+
+// --- driver availability is reported, not fatal ---
+assert(in_array(HttpTransport::detectDriver(), [HttpTransport::DRIVER_CURL, HttpTransport::DRIVER_STREAM], true));
+
 proc_terminate($proc);
-echo "OK: watch events, curl fallback send/sendRaw, auth guard, prefix edge all pass\n";
+echo "OK: watch events, curl + stream drivers, typed errors, auth guard, prefix edge all pass\n";
