@@ -465,8 +465,10 @@ erikwang2013/etcd/
 ├── phpunit.xml                      # PHPUnit 配置（unit / integration 两套套件）
 ├── config/etcd.php                  # 默认配置，供各框架发布（读取 ETCD_* 环境变量）
 ├── .github/workflows/release.yml    # 打 tag 时自动发布
+├── scripts/i18n/                    #   文档工具：词条目录、设计图生成、翻译校验
 ├── docs/                            # 文档与设计图
 │   ├── design-cn.md                 #   设计文档
+│   ├── i18n/                        #   13 种语言的 README 与本地化设计图
 │   ├── pet.svg                      #   项目宠物 Etchy
 │   ├── architecture.svg             #   架构设计图
 │   ├── features.svg                 #   功能设计图

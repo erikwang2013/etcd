@@ -448,8 +448,10 @@ erikwang2013/etcd/
 ├── phpunit.xml                      # PHPUnit 配置（unit / integration 两套套件）
 ├── config/etcd.php                  # 默认配置，供各框架发布（读取 ETCD_* 环境变量）
 ├── .github/workflows/release.yml    # 打 tag 时自动发布
+├── scripts/i18n/                    #   perkakas doks: katalog, pembuat diagram, pemeriksaan terjemahan
 ├── docs/                            # 文档与设计图
 │   ├── design-cn.md                 #   设计文档
+│   ├── i18n/                        #   README dan diagram terlokalisasi dalam 13 bahasa
 │   ├── pet.svg                      #   项目宠物 Etchy
 │   ├── architecture.svg             #   架构设计图
 │   ├── features.svg                 #   功能设计图

@@ -53,7 +53,7 @@
   "arch.msg.body": "Google\\Protobuf\\Internal\\Message を継承しない素の PHP データクラス。トランスポートが符号化に使い、ネットワークホップではない。",
   "arch.msg.i1": "Mvccpb —— KeyValue / Event",
   "arch.msg.i2": "Etcdserverpb —— 60+ リクエスト/応答",
-  "arch.msg.i3": "Authpb —— User / Role / Permission",
+  "arch.msg.i3": "Authpb — User / Role / Permission",
   "arch.msg.title": "メッセージ層 · Protobuf スタブ",
   "arch.sel.body": "transport = grpc → GrpcTransport ｜ http → HttpTransport ｜ auto → ext-grpc と Grpc\\BaseStub を検出し、両方そろえば gRPC、なければ HTTP",
   "arch.srv1.sub": "HTTP JSON の入口",

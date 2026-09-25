@@ -448,8 +448,10 @@ erikwang2013/etcd/
 ├── phpunit.xml                      # PHPUnit कॉन्फ़िग (unit / integration दो सूट)
 ├── config/etcd.php                  # डिफ़ॉल्ट कॉन्फ़िग, फ़्रेमवर्क पब्लिश करने के लिए (ETCD_* env पढ़ता है)
 ├── .github/workflows/release.yml    # tag लगाने पर अपने-आप रिलीज़
+├── scripts/i18n/                    #   डॉक्स टूलिंग: कैटलॉग, डायग्राम बिल्डर, अनुवाद जाँच
 ├── docs/                            # डॉक्स और डिज़ाइन आरेख
 │   ├── design-cn.md                 #   डिज़ाइन डॉक्यूमेंट
+│   ├── i18n/                        #   13 भाषाओं में README और स्थानीयकृत डायग्राम
 │   ├── pet.svg                      #   प्रोजेक्ट पेट Etchy
 │   ├── architecture.svg             #   आर्किटेक्चर आरेख
 │   ├── features.svg                 #   फ़ीचर डिज़ाइन आरेख

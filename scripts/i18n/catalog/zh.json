@@ -53,7 +53,7 @@
   "arch.msg.body": "纯 PHP 数据类，不继承 Google\\Protobuf\\Internal\\Message；由传输层编解码使用，不是网络跳点。",
   "arch.msg.i1": "Mvccpb —— KeyValue / Event",
   "arch.msg.i2": "Etcdserverpb —— 60+ 请求 / 响应",
-  "arch.msg.i3": "Authpb —— User / Role / Permission",
+  "arch.msg.i3": "Authpb — User / Role / Permission",
   "arch.msg.title": "消息层 · Protobuf 消息桩",
   "arch.sel.body": "transport = grpc → GrpcTransport ｜ http → HttpTransport ｜ auto → 检测 ext-grpc 与 Grpc\\BaseStub，二者齐备才走 gRPC，否则回退 HTTP",
   "arch.srv1.sub": "HTTP JSON 入口",

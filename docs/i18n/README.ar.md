@@ -448,8 +448,10 @@ erikwang2013/etcd/
 ├── phpunit.xml                      # إعداد PHPUnit (مجموعتا unit / integration)
 ├── config/etcd.php                  # الإعداد الافتراضي، يُنشر لكل إطار (يقرأ متغيرات ETCD_*)
 ├── .github/workflows/release.yml    # نشر تلقائي عند إنشاء tag
+├── scripts/i18n/                    #   أدوات التوثيق: الكتالوجات، بناء المخططات، فحص الترجمات
 ├── docs/                            # التوثيق والمخططات
 │   ├── design-cn.md                 #   مستند التصميم
+│   ├── i18n/                        #   ملفات README والمخططات المترجمة لـ 13 لغة
 │   ├── pet.svg                      #   حيوان المشروع Etchy
 │   ├── architecture.svg             #   مخطط التصميم المعماري
 │   ├── features.svg                 #   مخطط تصميم الوظائف

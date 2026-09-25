@@ -78,6 +78,19 @@ def check_lang(lang: str, errors: list[str]) -> None:
         if not os.path.exists(os.path.join(I18N, expected)):
             fail(f"{rel}: {expected} was never built", errors)
 
+    # Fenced code must keep the source's shape: same blocks, same line counts.
+    # Only comments and example output strings may differ per language, so any
+    # added/removed line is structural drift (a stale project tree, a dropped
+    # example) rather than a translation choice.
+    shape_src = [(len(b.split("\n")), b.split("\n")[0]) for b in FENCE.findall(open(os.path.join(ROOT, "README.md"), encoding="utf-8").read())]
+    shape_dst = [(len(b.split("\n")), b.split("\n")[0]) for b in FENCE.findall(text)]
+    if shape_src != shape_dst:
+        for i, (a, b) in enumerate(zip(shape_src, shape_dst)):
+            if a != b:
+                fail(f"{rel}: code block #{i + 1} is {b[0]} lines, source has {a[0]}", errors)
+        if len(shape_src) != len(shape_dst):
+            fail(f"{rel}: {len(shape_dst)} code blocks, source has {len(shape_src)}", errors)
+
     # catalog coverage
     cat = os.path.join(CATALOG, f"{lang}.json")
     if lang == "zh":

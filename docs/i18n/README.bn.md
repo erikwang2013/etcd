@@ -58,7 +58,7 @@ $kv = $etcd->kv()->getOrFail('/app/config');
 
 // prefix স্ক্যান
 $all = $etcd->kv()->getByPrefix('/app/');
-echo "মোট {$all['count']} টি\n";
+echo "মোট {$all['count']}টি কী\n";
 
 // মুছে ফেলা
 $etcd->kv()->delete('/app/config');
@@ -448,8 +448,10 @@ erikwang2013/etcd/
 ├── phpunit.xml                      # PHPUnit কনফিগ (unit / integration দুটি স্যুট)
 ├── config/etcd.php                  # ডিফল্ট কনফিগ, ফ্রেমওয়ার্কে পাবলিশের জন্য (ETCD_* এনভায়রনমেন্ট ভেরিয়েবল পড়ে)
 ├── .github/workflows/release.yml    # tag দিলে স্বয়ংক্রিয় পাবলিশ
+├── scripts/i18n/                    #   ডক্স টুলিং: ক্যাটালগ, ডায়াগ্রাম বিল্ডার, অনুবাদ যাচাই
 ├── docs/                            # ডকুমেন্টেশন ও ডিজাইন ডায়াগ্রাম
 │   ├── design-cn.md                 #   ডিজাইন ডকুমেন্ট
+│   ├── i18n/                        #   13টি ভাষায় README ও স্থানীয়কৃত ডায়াগ্রাম
 │   ├── pet.svg                      #   প্রজেক্ট পেট Etchy
 │   ├── architecture.svg             #   আর্কিটেকচার ডায়াগ্রাম
 │   ├── features.svg                 #   ফিচার ডায়াগ্রাম

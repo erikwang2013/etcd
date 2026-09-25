@@ -191,7 +191,7 @@ $lease = $etcd->lease()->grant(300, 99999);      // ID de bail explicite
 
 // renouvellement (une fois)
 $result = $etcd->lease()->keepAlive($lease['ID']);
-echo "TTL restant: {$result['TTL']} secondes";
+echo "TTL restant : {$result['TTL']} secondes";
 
 // consulter l'état du bail
 $info = $etcd->lease()->timeToLive($lease['ID']);
@@ -448,8 +448,10 @@ erikwang2013/etcd/
 ├── phpunit.xml                      # configuration PHPUnit (deux suites : unit / integration)
 ├── config/etcd.php                  # configuration par défaut, publiée par chaque framework (lit les variables ETCD_*)
 ├── .github/workflows/release.yml    # publication automatique au tag
+├── scripts/i18n/                    #   outillage doc : catalogues, générateur de schémas, vérification des traductions
 ├── docs/                            # documentation et diagrammes
 │   ├── design-cn.md                 #   document de conception
+│   ├── i18n/                        #   README et schémas localisés en 13 langues
 │   ├── pet.svg                      #   la mascotte du projet, Etchy
 │   ├── architecture.svg             #   diagramme d'architecture
 │   ├── features.svg                 #   diagramme de conception fonctionnelle

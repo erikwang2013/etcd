@@ -46,8 +46,29 @@ ORANGE = "#fb923c"
 FONT = ("Helvetica,Arial,'Noto Sans','Noto Sans CJK SC','Noto Sans Devanagari','Noto Sans Bengali',"
         "'Noto Sans Arabic','Lohit Devanagari','PingFang SC','Microsoft YaHei',sans-serif")
 MONO = "'DejaVu Sans Mono',Menlo,Consolas,'Noto Sans Mono CJK SC',monospace"
-AF = 0.60      # narrow-char width factor, sans
-MF = 0.62      # narrow-char width factor, mono
+MF = 0.602     # monospace advance, exact for DejaVu Sans Mono / Menlo
+AF = None      # None = measure sans text with the per-character table below
+
+# Helvetica/Arial advance widths (em/1000). A flat "average character" factor
+# over-measured real prose by 25%+, which wrapped text early and truncated
+# single-line labels that would have fitted.
+_ADV: dict[str, float] = {}
+for _chars, _w in [
+    (" ", .278), ("!", .278), ('"', .355), ("#", .556), ("$", .556), ("%", .889), ("&", .667), ("'", .191),
+    ("(", .333), (")", .333), ("*", .389), ("+", .584), (",", .278), ("-", .333), (".", .278), ("/", .278),
+    ("0123456789", .556), (":", .278), (";", .278), ("<", .584), ("=", .584), (">", .584), ("?", .556), ("@", 1.015),
+    ("ABC", .667), ("D", .722), ("E", .667), ("F", .611), ("G", .778), ("H", .722), ("I", .278), ("J", .500),
+    ("K", .667), ("L", .556), ("M", .833), ("N", .722), ("O", .778), ("P", .667), ("Q", .778), ("R", .722),
+    ("S", .667), ("T", .611), ("U", .722), ("V", .667), ("W", .944), ("X", .667), ("Y", .667), ("Z", .611),
+    ("[", .278), ("\\", .278), ("]", .278), ("^", .469), ("_", .556), ("`", .333),
+    ("a", .556), ("b", .556), ("c", .500), ("d", .556), ("e", .556), ("f", .278), ("g", .556), ("h", .556),
+    ("i", .222), ("j", .222), ("k", .500), ("l", .222), ("m", .833), ("n", .556), ("o", .556), ("p", .556),
+    ("q", .556), ("r", .333), ("s", .500), ("t", .278), ("u", .556), ("v", .500), ("w", .722), ("x", .500),
+    ("y", .500), ("z", .500), ("{", .334), ("|", .260), ("}", .334), ("~", .584),
+]:
+    for _c in _chars:
+        _ADV[_c] = _w
+DEFAULT_ADV = 0.56   # Cyrillic / Arabic / Devanagari / Bengali: proportional, unmeasured
 
 
 # ------------------------------------------------------------------ catalog
@@ -115,7 +136,7 @@ T = {
     "arch.msg.body": "纯 PHP 数据类，不继承 Google\\Protobuf\\Internal\\Message；由传输层编解码使用，不是网络跳点。",
     "arch.msg.i1": "Mvccpb —— KeyValue / Event",
     "arch.msg.i2": "Etcdserverpb —— 60+ 请求 / 响应",
-    "arch.msg.i3": "Authpb —— User / Role / Permission",
+    "arch.msg.i3": "Authpb — User / Role / Permission",
     "arch.dep.title": "运行依赖",
     "arch.dep.1": "psr/http-client ^1.0  必需",
     "arch.dep.2": "psr/http-factory ^1.0  必需",
@@ -252,6 +273,8 @@ T = {
 
 LANG = "zh"
 PROBLEMS: list[str] = []
+TIGHT: list[str] = []
+TIGHT_RATIO = 0.94
 
 
 def load_catalog(lang: str) -> dict[str, str]:
@@ -275,8 +298,13 @@ def s(key: str) -> str:
 
 
 # ------------------------------------------------------------- text metrics
-def sw(text: str, size: float, factor: float = AF) -> float:
-    return sum(size * (1.0 if ord(c) > 0x2E80 else factor) for c in text)
+def sw(text: str, size: float, factor: float | None = AF) -> float:
+    """Advance width in user units. CJK/kana/hangul are exactly 1em; Latin uses
+    the Helvetica table; a float ``factor`` switches to a flat per-character
+    model (monospace, where every glyph advances by the same amount)."""
+    if factor is not None:
+        return size * factor * len(text)
+    return size * sum(1.0 if ord(c) > 0x2E80 else _ADV.get(c, DEFAULT_ADV) for c in text)
 
 
 def esc(text: str) -> str:
@@ -298,7 +326,7 @@ def _tokens(text: str):
     return toks
 
 
-def wrap(text: str, max_w: float, size: float, factor: float = AF) -> list[str]:
+def wrap(text: str, max_w: float, size: float, factor: float | None = AF) -> list[str]:
     lines, cur = [], ""
     for tk in _tokens(text):
         if sw(cur + tk, size, factor) <= max_w or not cur.strip():
@@ -319,8 +347,17 @@ def wrap(text: str, max_w: float, size: float, factor: float = AF) -> list[str]:
 
 
 def fit_text(text: str, max_w: float, size: float, max_lines: int = 1,
-             factor: float = AF, key: str = "") -> list[str]:
+             factor: float | None = AF, key: str = "") -> list[str]:
     lines = wrap(text, max_w, size, factor)
+    if lines and max_w:
+        # The width metric is an estimate; a browser may lay the same string out
+        # a few percent wider. Flag anything with less than ~6% headroom so it
+        # can be reworded while there is still slack.
+        # Only single-line text is at risk: wrapped text that fills a line is
+        # just a normal wrap point, whereas a capped one-liner has nowhere to go.
+        fill = max(sw(ln, size, factor) for ln in lines) / max_w
+        if max_lines == 1 and fill > TIGHT_RATIO:
+            TIGHT.append(f"[{LANG}] {key or text[:24]}: {fill:.0%} of its box -> {text!r}")
     if len(lines) > max_lines:
         PROBLEMS.append(
             f"[{LANG}] {key or text[:24]}: needs {len(lines)} lines, box fits {max_lines} "
@@ -329,12 +366,12 @@ def fit_text(text: str, max_w: float, size: float, max_lines: int = 1,
     return lines[:max_lines]
 
 
-def fit(key: str, max_w: float, size: float, max_lines: int = 99, factor: float = AF) -> list[str]:
+def fit(key: str, max_w: float, size: float, max_lines: int = 99, factor: float | None = AF) -> list[str]:
     """Wrap a catalog string and complain if it needs more room than the box has."""
     return fit_text(s(key), max_w, size, max_lines, factor, key)
 
 
-def fits(key: str, max_w: float, max_lines: int = 1, size: float = 11, factor: float = AF) -> str:
+def fits(key: str, max_w: float, max_lines: int = 1, size: float = 11, factor: float | None = AF) -> str:
     """One-shot guard for text that is drawn on a single line with a known width."""
     return fit(key, max_w, size, max_lines, factor)[0]
 
@@ -733,6 +770,10 @@ def main(argv: list[str]) -> int:
         for prob in PROBLEMS:
             print("  " + prob, file=sys.stderr)
         return 1
+    if TIGHT:
+        print(f"\n{len(TIGHT)} string(s) within {1 - TIGHT_RATIO:.0%} of their box (no failure):")
+        for t in TIGHT:
+            print("  ! " + t)
     print(f"\nOK — {len(langs)} language(s), all strings fit their boxes.")
     return 0
 

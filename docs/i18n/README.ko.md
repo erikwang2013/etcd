@@ -448,8 +448,10 @@ erikwang2013/etcd/
 ├── phpunit.xml                      # PHPUnit 설정 (unit / integration 두 스위트)
 ├── config/etcd.php                  # 기본 설정, 각 프레임워크 게시용 (ETCD_* 환경 변수 읽기)
 ├── .github/workflows/release.yml    # 태그 푸시 시 자동 릴리스
+├── scripts/i18n/                    #   문서 도구: 카탈로그, 다이어그램 빌더, 번역 검사
 ├── docs/                            # 문서와 설계도
 │   ├── design-cn.md                 #   설계 문서
+│   ├── i18n/                        #   13개 언어 README와 현지화 다이어그램
 │   ├── pet.svg                      #   프로젝트 펫 Etchy
 │   ├── architecture.svg             #   아키텍처 설계도
 │   ├── features.svg                 #   기능 설계도

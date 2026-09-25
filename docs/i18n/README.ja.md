@@ -448,8 +448,10 @@ erikwang2013/etcd/
 ├── phpunit.xml                      # PHPUnit 設定（unit / integration の 2 スイート）
 ├── config/etcd.php                  # 既定設定。各フレームワークへ publish（ETCD_* 環境変数を読む）
 ├── .github/workflows/release.yml    # タグ付けで自動リリース
+├── scripts/i18n/                    #   ドキュメント用ツール: カタログ、図の生成、翻訳チェック
 ├── docs/                            # ドキュメントと設計図
 │   ├── design-cn.md                 #   設計ドキュメント
+│   ├── i18n/                        #   13 言語の README とローカライズ済み図
 │   ├── pet.svg                      #   マスコット Etchy
 │   ├── architecture.svg             #   アーキテクチャ設計図
 │   ├── features.svg                 #   機能設計図

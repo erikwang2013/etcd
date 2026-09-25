@@ -448,8 +448,10 @@ erikwang2013/etcd/
 ├── phpunit.xml # configuración de PHPUnit (suites unit / integration)
 ├── config/etcd.php # configuración por defecto que publican los frameworks (lee variables ETCD_*)
 ├── .github/workflows/release.yml # publica automáticamente al crear un tag
+├── scripts/i18n/                 #   herramientas de docs: catálogos, generador de diagramas, validación
 ├── docs/ # documentación y diagramas
 │   ├── design-cn.md # documento de diseño
+│   ├── i18n/        #   README y diagramas localizados en 13 idiomas
 │   ├── pet.svg # mascota del proyecto Etchy
 │   ├── architecture.svg # diagrama de arquitectura
 │   ├── features.svg # diagrama de diseño de funciones
