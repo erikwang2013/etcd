@@ -29,11 +29,39 @@ jobs:
           if [ -z "$latest" ]; then
             echo "version=0.1.0" >> "$GITHUB_OUTPUT"
             echo "prev=" >> "$GITHUB_OUTPUT"
-          else
-            next=$(echo "$latest" | awk -F. '{print $1"."$2"."($3+1)}')
-            echo "version=${next#v}" >> "$GITHUB_OUTPUT"
-            echo "prev=$latest" >> "$GITHUB_OUTPUT"
+            echo "no previous tag: first release is 0.1.0"
+            exit 0
           fi
+
+          range="$latest..HEAD"
+          major=$(echo "$latest" | cut -d. -f1 | tr -d 'v')
+          minor=$(echo "$latest" | cut -d. -f2)
+          patch=$(echo "$latest" | cut -d. -f3)
+
+          # Minor when the release adds public API: a new PHP type under src/,
+          # or any commit in the range carrying a [minor] marker (for changes
+          # that introduce API without adding a file, or for forcing a bump).
+          new_types=$(git diff -U0 "$range" -- src/ \
+            | grep -cE '^\+[[:space:]]*(final |abstract |readonly )*(class|interface|trait|enum) ' || true)
+          if [ "$new_types" -gt 0 ]; then
+            bump=minor
+            reason="added public type under src/ ($new_types declaration(s))"
+          elif git log --format='%s%n%b' "$range" | grep -qE '\[minor\]'; then
+            bump=minor
+            reason="a commit in $range is marked [minor]"
+          else
+            bump=patch
+            reason="no new public API in $range"
+          fi
+
+          if [ "$bump" = minor ]; then
+            next="$major.$((minor + 1)).0"
+          else
+            next="$major.$minor.$((patch + 1))"
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "prev=$latest" >> "$GITHUB_OUTPUT"
+          echo "$latest -> v$next ($bump: $reason)"
 
       - name: Run tests
         run: composer install --no-interaction --prefer-dist && vendor/bin/phpunit --bootstrap vendor/autoload.php tests/Unit --no-coverage
