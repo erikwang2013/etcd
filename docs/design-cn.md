@@ -342,10 +342,12 @@ erikwang2013/etcd/
 
 ## 待办路线图
 
-- [ ] gRPC 传输完整实现（需从 `rpc.proto` 生成正式消息桩，手写桩已删除）
-- [ ] TLS/SSL 双向认证支持
-- [ ] 选举（Election）和并发控制 API
-- [ ] 单元测试 + 集成测试（Docker etcd 容器）
+- [x] 消息层从上游 proto 生成（`protos/`，protoc 产物可复现）
+- [x] 选举（Election）与分布式锁（Lock，建在 Election 之上）
+- [x] 单元测试 + 集成测试（忠实网关桩 + `ETCD_REAL` 真集群差分，已接入 CI）
+- [x] TLS 配置（`options.ssl` 对 curl 与流封装生效，含客户端证书 `local_cert`/`local_pk`）
+- [ ] gRPC 流式调用（watch / snapshot；一元 RPC 已实现）
+- [ ] gRPC 网络往返验证（需 ext-grpc 环境，代码已就位）
 - [ ] Watch 多 key 并行监听
 - [ ] 连接池 / 长连接复用
 

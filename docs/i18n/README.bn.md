@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport, PSR HTTP স্টাব
 ```
 
+## পরীক্ষা
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # ইউনিট টেস্ট (ইন-মেমোরি স্টাব)
+
+# ইন্টিগ্রেশন: স্যুটটি নিজের নকল গেটওয়ে নিয়ে আসে যা আসলটির মতো আচরণ করে (chunked ফ্রেমিং + {"result":…} খাম + int64 স্ট্রিং)
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**আসল ক্লাস্টারে যাচাই (প্রস্তাবিত):** একই স্যুটকে আসল etcd-এর ঠিকানা দিন — একই কেস চলবে এবং যাচাই হবে নকল ও আসল গেটওয়ে মিলে (ফ্রেমিং, খাম, int64 এনকোডিং):
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> কেন এটি মূল্যবান: এই প্রকল্পে একসময় একগুচ্ছ ত্রুটি (watch সম্পূর্ণ অচল, আর্গুমেন্টহীন নয়টি মেথড 400,
+> keepAlive সবসময় exception) ৪০+ টেস্ট সবুজ থাকা অবস্থায় ছিল — স্টাব ও আসল গেটওয়ে **ফ্রেমিং ও খাম দুটোতেই**
+> আলাদা ছিল। সেগুলো ঠিক হয়েছে, আর এই ডিফারেনশিয়াল মোডই একই ধরনের বাগ আবার নিকটে দেয় না।
+
+ডকুমেন্ট ও ডায়াগ্রামের সঙ্গতিও স্ক্রিপ্টে রক্ষিত:
+
+```bash
+python3 scripts/i18n/check_translations.py      # ১৩টি অনুবাদ: সুইচার, লিংক, ক্যাটালগ, ফেন্স গঠন
+python3 scripts/i18n/build_diagrams.py --check --all   # ১৩ ভাষার ডায়াগ্রাম: প্রতিটি স্ট্রিং মাপা
+python3 scripts/i18n/sync_zh_readme.py --check  # zh কপি রুট README-এর সঙ্গে সিঙ্ক
+```
+
+CI (`.github/workflows/ci.yml`) উপরের সবকিছু চালায়: PHP 8.2/8.3-এ ইউনিট টেস্ট, PHP 8.0/8.1-এ সিনট্যাক্স ফ্লোর, ইন্টিগ্রেশন (সার্ভিস কন্টেইনারে আসল etcd-এর বিপরীতে ডিফারেনশিয়ালসহ), এবং ওই তিনটি ডকুমেন্ট যাচাই।
+
 ## আর্কিটেকচার ও ডিজাইন ডায়াগ্রাম
 
 তিনটি ডায়াগ্রাম "স্ট্রাকচার → সক্ষমতা → টাইমলাইন" ক্রমে সাজানো, আলাদা করেও দেখা যায়:

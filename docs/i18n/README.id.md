@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport, stub PSR HTTP
 ```
 
+## Pengujian
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # uji unit (stub di memori)
+
+# integrasi: suite membawa gateway palsu sendiri yang meniru yang asli (framing chunked + amplop {"result":…} + int64 sebagai string)
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**Verifikasi terhadap klaster nyata (disarankan):** beri suite yang sama alamat etcd nyata — ia menjalankan kasus yang sama dan memastikan gateway palsu dan asli sepakat (framing, amplop, penyandian int64):
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> Kenapa layak: proyek ini pernah membawa sekumpulan cacat (watch mati total, sembilan metode tanpa argumen
+> mengembalikan 400, keepAlive selalu melempar) sementara 40+ tes hijau — fixture dan gateway asli berbeda
+> **pada framing maupun amplop**. Semuanya sudah diperbaiki, dan mode diferensial inilah yang mencegah kelas bug yang sama lolos lagi.
+
+Dokumentasi dan diagram juga dijaga konsisten oleh skrip:
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13 terjemahan: pengalih bahasa, tautan, katalog, struktur blok
+python3 scripts/i18n/build_diagrams.py --check --all   # diagram dalam 13 bahasa: setiap string diukur
+python3 scripts/i18n/sync_zh_readme.py --check  # salinan zh sinkron dengan README akar
+```
+
+CI (`.github/workflows/ci.yml`) menjalankan semuanya: uji unit di PHP 8.2/8.3, batas sintaks di PHP 8.0/8.1, suite integrasi (termasuk lintasan diferensial terhadap etcd nyata di kontainer layanan), dan tiga pemeriksaan dokumentasi itu.
+
 ## Arsitektur dan Diagram Desain
 
 Tiga diagram disusun sebagai struktur → kemampuan → urutan waktu; klik untuk membuka masing-masing:

@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport、PSR HTTP スタブ
 ```
 
+## テスト
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # 単体テスト（インメモリのスタブ）
+
+# 統合：スイートは実物を模した偽ゲートウェイを同梱しています（chunked フレーミング + {"result":…} エンベロープ + int64 は文字列）
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**実クラスタでの検証（推奨）：** 同じスイートに実 etcd のアドレスを渡すと、同じケースを実行し、偽ゲートウェイと実物が一致するか（フレーミング、エンベロープ、int64 エンコード）を検証します：
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> なぜやる価値があるか：このプロジェクトはかつて 40 以上のテストが緑のまま、一群の不具合（watch が完全に動かない、
+> 引数なしの 9 メソッドが 400、keepAlive が必ず例外）を抱えていました。原因はスタブと実ゲートウェイが
+> **フレーミングとエンベロープの両方で**違っていたことです。それらは修正済みで、この差分モードが再流入を防ぎます。
+
+ドキュメントと図の整合もスクリプトが守ります：
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13 言語の翻訳：切り替え、リンク、カタログ、フェンス構造
+python3 scripts/i18n/build_diagrams.py --check --all   # 13 言語の図：すべての文字列を計測
+python3 scripts/i18n/sync_zh_readme.py --check  # zh コピーはルート README と同期
+```
+
+CI（`.github/workflows/ci.yml`）が上記すべてを実行します：PHP 8.2/8.3 の単体テスト、PHP 8.0/8.1 の構文フロア、統合（サービスコンテナ内の実 etcd に対する差分を含む）、そして 3 つのドキュメント検証。
+
 ## アーキテクチャと設計図
 
 3 つの図は「構造 → 能力 → 時系列」の順に構成されており、個別にクリックして閲覧できます：

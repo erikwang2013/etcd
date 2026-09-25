@@ -1,6 +1,6 @@
 {
     "name": "erikwang2013/etcd",
-    "description": "PHP etcd v3 client with gRPC + HTTP dual transport and the full v3 API (KV, Watch, Lease, Auth, Cluster, Maintenance). Runs on plain PHP: no framework, no PSR-18 implementation and no ext-curl required. Laravel, Hyperf, ThinkPHP and Webman adapters included.",
+    "description": "PHP etcd v3 client over HTTP (full API) and gRPC (unary RPCs), covering KV, Watch, Lease, Auth, Cluster, Maintenance, Election and Lock. Runs on plain PHP: no framework, no PSR-18 implementation and no ext-curl required. Laravel, Hyperf, ThinkPHP and Webman adapters included.",
     "type": "library",
     "license": "MIT",
     "authors": [

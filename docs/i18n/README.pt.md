@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport, stubs HTTP PSR
 ```
 
+## Testes
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # testes unitários (stubs em memória)
+
+# integração: a suíte traz seu próprio gateway falso que espelha o real (framing chunked + envelope {"result":…} + int64 como strings)
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**Verificação contra um cluster real (recomendada):** dê à mesma suíte um endereço de etcd real — ela roda os mesmos casos e verifica que o gateway falso e o real concordam (framing, envelope, codificação int64):
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> Por que vale a pena: este projeto já carregou uma leva de defeitos (watch totalmente morto, nove métodos sem
+> argumento retornando 400, keepAlive sempre lançando) com 40+ testes verdes — o fixture e o gateway real diferiam
+> **tanto no framing quanto no envelope**. Já foram corrigidos, e este modo diferencial impede que a mesma classe de bug volte a passar.
+
+A documentação e os diagramas também são mantidos coerentes por scripts:
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13 traduções: seletor, links, catálogo, estrutura dos blocos
+python3 scripts/i18n/build_diagrams.py --check --all   # diagramas em 13 idiomas: cada string medida
+python3 scripts/i18n/sync_zh_readme.py --check  # cópia zh sincronizada com o README raiz
+```
+
+A CI (`.github/workflows/ci.yml`) roda tudo isso: testes unitários em PHP 8.2/8.3, um piso de sintaxe em PHP 8.0/8.1, a suíte de integração (incluindo a passada diferencial contra um etcd real em contêiner de serviço) e essas três checagens de documentação.
+
 ## Arquitetura e diagramas de design
 
 Três diagramas, organizados como estrutura → capacidades → linha do tempo. Clique em qualquer um para abrir o arquivo em tamanho real:

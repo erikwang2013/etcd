@@ -79,8 +79,8 @@ T = {
     "common.arch_desc": "五层架构：框架适配层、门面层、子系统层、传输层与 etcd 服务端，附横切关注点、消息层与异常体系。",
     "common.arch_alt": "erikwang2013/etcd 架构设计图",
     "common.feat_title": "erikwang2013/etcd · 功能设计",
-    "common.feat_sub": "六大 API 领域 —— 方法速览与行为约定",
-    "common.feat_desc": "KV、Watch、Lease、Auth、Cluster、Maintenance 六大功能域及其方法与行为约定。",
+    "common.feat_sub": "八大 API 领域 —— 方法速览与行为约定",
+    "common.feat_desc": "KV、Watch、Lease、Auth、Cluster、Maintenance、Election、Lock 八大功能域及其方法与行为约定。",
     "common.feat_alt": "erikwang2013/etcd 功能设计图",
     "common.life_title": "erikwang2013/etcd · 生命周期",
     "common.life_sub": "一次请求、一条监听、一个租约 —— 三条主线",
@@ -95,15 +95,17 @@ T = {
     "arch.app.thinkphp.sub": "Service + Facade",
     "arch.app.webman.sub": "Plugin::install()",
     "arch.b2": "门面层",
-    "arch.facade": "EtcdClient —— 统一入口，惰性构建六大子系统",
+    "arch.facade": "EtcdClient —— 统一入口，惰性构建八大子系统",
     "arch.b2.note": "领域方法调用",
-    "arch.b3": "子系统层 —— 六大 API 领域",
+    "arch.b3": "子系统层 —— 八大 API 领域",
     "arch.kv.sub": "put / get / getByPrefix / txn / compact",
     "arch.watch.sub": "watch / watchPrefix · 断线续订",
     "arch.lease.sub": "grant / keepAlive / revoke / TTL",
     "arch.auth.sub": "RBAC：用户 / 角色 / 权限",
     "arch.cluster.sub": "成员增删 / Learner 提升",
     "arch.maint.sub": "status / alarm / defrag / snapshot",
+    "arch.election.sub": "campaign / proclaim / leader / observe / resign",
+    "arch.lock.sub": "acquire / release（建在 Election 之上）",
     "arch.b3.note": "send() / sendRaw() / watch()",
     "arch.b4": "传输层",
     "arch.sel.body": "transport = auto / http / grpc；auto 目前等同 http（gRPC 只覆盖一元 RPC，流式与 Election 仍需 HTTP），显式传 grpc 才会选中它",
@@ -204,7 +206,21 @@ T = {
     "feat.maint.m3": "defragment() 碎片整理",
     "feat.maint.m4": "hash([revision]) KV 哈希校验",
     "feat.maint.m5": "snapshot() 返回原始二进制",
-    "feat.maint.n": "snapshot() 经 sendRaw() 返回原始二进制，可直接落盘作为备份文件。",
+    "feat.maint.n": "snapshot() 经 sendRaw() 返回原始二进制，可直接落盘作为备份文件；大库用 snapshotTo() 流式落盘。",
+    "feat.election.t": "Election 选举",
+    "feat.election.s": "基于租约的 leader 选举",
+    "feat.election.m1": "campaign(name, value, lease)",
+    "feat.election.m2": "proclaim(value, leader)",
+    "feat.election.m3": "leader(name)",
+    "feat.election.m4": "observe(name, cb)",
+    "feat.election.m5": "resign(leader)",
+    "feat.election.n": "campaign 在网关上返回缓冲响应：当选才返回，用 timeout 兜底；proclaim/resign 必须带完整 leader 描述符（name/key/rev），少字段时服务端回 200 却不生效。",
+    "feat.lock.t": "Lock 分布式锁",
+    "feat.lock.s": "建在 Election 之上的客户端实现",
+    "feat.lock.m1": "acquire(name, ttl, timeout)",
+    "feat.lock.m2": "release(lock)",
+    "feat.lock.m3": "leader(name)",
+    "feat.lock.n": "etcd 3.5 的网关不暴露 /v3/lock/*（实测 404），互斥由竞选 + 租约提供；持有者被 SIGKILL 后租约到期自动释放，无需人工清理。",
 
     # ---- lifecycle
     "life.r1.t": "请求生命周期",
@@ -485,11 +501,12 @@ def architecture():
     y += 14
     p.append(rect(MX, y, MW, 120, fill=PANEL2, stroke=BLUE, rx=16))
     p.append(txt(CX, y + 32, fits("arch.facade", MW - 60, 1, 15), size=15, fill=TEXT, weight="700", anchor="middle"))
-    cw = (MW - 40 - 5 * 12) // 6
-    for i, sub in enumerate(["kv", "watch", "lease", "auth", "cluster", "maintenance"]):
-        x = MX + 20 + i * (cw + 12)
+    accessors = ["kv", "watch", "lease", "auth", "cluster", "maintenance", "election", "lock"]
+    cw = (MW - 40 - (len(accessors) - 1) * 8) // len(accessors)
+    for i, sub in enumerate(accessors):
+        x = MX + 20 + i * (cw + 8)
         p.append(rect(x, y + 50, cw, 44, fill=BG, rx=10, sw_=1))
-        p.append(txt(x + cw / 2, y + 78, sub, size=13, fill=BLUE, anchor="middle", mono=True))
+        p.append(txt(x + cw / 2, y + 78, sub, size=11, fill=BLUE, anchor="middle", mono=True))
     y += 120
     arrow(y, "arch.b2.note")
     y += GAP
@@ -498,7 +515,8 @@ def architecture():
     y += 14
     subsys = [("KvClient", "arch.kv.sub"), ("WatchClient", "arch.watch.sub"), ("LeaseClient", "arch.lease.sub"),
               ("AuthClient · UserClient · RoleClient", "arch.auth.sub"), ("ClusterClient", "arch.cluster.sub"),
-              ("MaintenanceClient", "arch.maint.sub")]
+              ("MaintenanceClient", "arch.maint.sub"), ("ElectionClient", "arch.election.sub"),
+              ("LockClient", "arch.lock.sub")]
     cw3 = (MW - 40) // 3
     for i, (t, sk) in enumerate(subsys):
         x = MX + (i % 3) * (cw3 + 20)
@@ -508,7 +526,7 @@ def architecture():
                          for j, ln in enumerate(fit(t, cw3 - 36, 12.5, 2))))
         p.append("".join(txt(x + 18, yy + 58 + j * 15, ln, size=11, fill=MUTED)
                          for j, ln in enumerate(fit(sk, cw3 - 36, 11, 2))))
-    y += 82 + 98
+    y += 82 + 98 * ((len(subsys) - 1) // 3)
     arrow(y, "arch.b3.note")
     y += GAP
 
@@ -631,12 +649,13 @@ def architecture():
 
 # ================================================================ features
 def features():
-    W, H = 1200, 880
-    cw, ch, gx, gy = 357, 330, 24, 24
+    W, H = 1200, 1290
+    cw, ch, gx, gy = 357, 348, 24, 24
     p = [header(W, "common.feat_title", "common.feat_sub")]
     cards = [
         (BLUE, "K", "feat.kv", 6), (TEAL, "W", "feat.watch", 5), (AMBER, "L", "feat.lease", 5),
         (PURPLE, "A", "feat.auth", 6), (SKY, "C", "feat.cluster", 5), (ORANGE, "M", "feat.maint", 5),
+        (TEAL, "E", "feat.election", 5), (PURPLE, "D", "feat.lock", 3),
     ]
     for i, (col, glyph, base, nm) in enumerate(cards):
         x = 40 + (i % 3) * (cw + gx)
@@ -656,7 +675,7 @@ def features():
                 p.append(circle(x + 29, cy0 - 4, 2.5, col))
                 p.append(txt(x + 40, cy0, ln, size=10.5, fill=BODY, mono=True))
         p.append(line(x + 26, y + 258, x + cw - 26, y + 258, stroke=BORDER, sw_=1))
-        for k, ln in enumerate(fit(f"{base}.n", cw - 56, 11, 3)):
+        for k, ln in enumerate(fit(f"{base}.n", cw - 56, 11, 4)):
             p.append(txt(x + 26, y + 282 + k * 15.5, ln, size=11, fill=MUTED))
 
     p.append(txt(40, H - 34, fits("feat.footer", W - 80, 1, 12), size=12, fill=DIM))

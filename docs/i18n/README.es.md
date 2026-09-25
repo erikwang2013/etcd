@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/ # FakeTransport, stubs HTTP PSR
 ```
 
+## Pruebas
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # pruebas unitarias (stubs en memoria)
+
+# integración: la suite trae su propia pasarela falsa que imita la real (framing chunked + sobre {"result":…} + int64 como cadenas)
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**Verificación contra un clúster real (recomendada):** dale a la misma suite una dirección de etcd real — ejecuta los mismos casos y comprueba que la pasarela falsa y la real coinciden (framing, sobre, codificación int64):
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> Por qué merece la pena: este proyecto llegó a tener una tanda de defectos (watch totalmente muerto, nueve métodos
+> sin argumentos devolviendo 400, keepAlive lanzando siempre) con más de 40 pruebas en verde — el fixture y la
+> pasarela real diferían **tanto en el framing como en el sobre**. Ya están corregidos, y este modo diferencial evita que la misma clase de fallo vuelva a colarse.
+
+La documentación y los diagramas también los mantienen coherentes unos scripts:
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13 traducciones: conmutador, enlaces, catálogo, estructura de bloques
+python3 scripts/i18n/build_diagrams.py --check --all   # diagramas en 13 idiomas: cada cadena medida
+python3 scripts/i18n/sync_zh_readme.py --check  # copia zh sincronizada con el README raíz
+```
+
+La CI (`.github/workflows/ci.yml`) ejecuta todo lo anterior: pruebas unitarias en PHP 8.2/8.3, un suelo de sintaxis en PHP 8.0/8.1, la suite de integración (incluida la pasada diferencial contra un etcd real en un contenedor de servicio) y esas tres comprobaciones de documentación.
+
 ## Arquitectura y diagramas
 
 Los tres diagramas se organizan como «estructura → capacidades → secuencia» y pueden abrirse por separado:

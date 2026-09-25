@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport, PSR HTTP stubs
 ```
 
+## Tests
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # unit tests (in-memory stubs)
+
+# integration: the suite brings its own fake gateway that mirrors the real one (chunked framing + {"result":…} envelope + int64 as strings)
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**Verifying against a real cluster (recommended):** give the same suite a live etcd address — it runs the same cases and asserts that the fake gateway and the real one agree (framing, envelope, int64 encoding):
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> Why it is worth doing: this project once shipped a batch of defects (watch completely dead, nine zero-argument
+> methods returning 400, keepAlive always throwing) while 40+ tests were green — the fixture and the real gateway
+> differed in **both framing and envelope**. Those are fixed, and this differential mode is what stops the same class of bug from slipping through again.
+
+Documentation and diagrams are kept consistent by scripts too:
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13 translations: switcher, links, catalog, fence structure
+python3 scripts/i18n/build_diagrams.py --check --all   # diagrams in 13 languages: every string measured
+python3 scripts/i18n/sync_zh_readme.py --check  # zh copy in sync with the root README
+```
+
+CI (`.github/workflows/ci.yml`) runs all of the above: unit tests on PHP 8.2/8.3, a syntax floor on PHP 8.0/8.1, the integration suite (including the differential run against a real etcd in a service container), and those three documentation checks.
+
 ## Architecture and design diagrams
 
 Three diagrams, organised as structure → capabilities → timing. Click any of them for the full-size file:

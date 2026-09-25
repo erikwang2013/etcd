@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport, PSR-HTTP-Stubs
 ```
 
+## Tests
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # Unit-Tests (In-Memory-Stubs)
+
+# Integration: der Satz bringt ein eigenes Fake-Gateway mit, das dem echten entspricht (Chunked-Framing + {"result":…}-Hülle + int64 als Strings)
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**Verifikation gegen einen echten Cluster (empfohlen):** geben Sie demselben Satz eine echte etcd-Adresse — er führt dieselben Fälle aus und prüft, dass Fake-Gateway und echtes Gateway übereinstimmen (Framing, Hülle, int64-Kodierung):
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> Warum sich das lohnt: Dieses Projekt trug einst eine Reihe von Defekten (watch komplett tot, neun argumentlose
+> Methoden lieferten 400, keepAlive warf immer) bei 40+ grünen Tests — Fixture und echtes Gateway unterschieden sich
+> **in Framing und Hülle**. Diese sind behoben, und dieser differenzielle Modus verhindert dieselbe Fehlerklasse.
+
+Auch Doku und Diagramme halten Skripte konsistent:
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13 Übersetzungen: Umschalter, Links, Katalog, Fence-Struktur
+python3 scripts/i18n/build_diagrams.py --check --all   # Diagramme in 13 Sprachen: jede Zeichenkette gemessen
+python3 scripts/i18n/sync_zh_readme.py --check  # zh-Kopie synchron zum Root-README
+```
+
+CI (`.github/workflows/ci.yml`) führt all das aus: Unit-Tests auf PHP 8.2/8.3, eine Syntax-Untergrenze auf PHP 8.0/8.1, den Integrationstest (inklusive differenziellem Lauf gegen echtes etcd im Service-Container) und die drei Doku-Prüfungen.
+
 ## Architektur und Design-Diagramme
 
 Drei Diagramme, gegliedert nach Struktur → Fähigkeiten → Ablauf; jedes lässt sich einzeln in voller Größe öffnen:

@@ -598,6 +598,43 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport、PSR HTTP 桩
 ```
 
+## 测试
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # 单元测试（内存桩）
+
+# 集成测试：自带一个忠实于真实网关的假网关（chunked 分帧 + {"result":…} 信封 + int64 字符串）
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**对真实集群验证（推荐）**：给同一个套件一个真 etcd 地址，它会跑同一批用例，并断言假网关与真网关的行为一致（分帧、信封、int64 编码）：
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> 为什么值得这么跑：本项目曾有一批缺陷（watch 完全不可用、9 个无参方法 400、keepAlive 必抛…）
+> 在 40+ 个测试全绿的情况下存活，原因正是**测试桩与真实网关在分帧与信封两方面都不同**。
+> 那批问题已修复，而这个差分模式就是防止同类问题再次溜过去的机制。
+
+文档与设计图的一致性也由脚本守住：
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13 份译本：切换器、链接、词条、围栏结构
+python3 scripts/i18n/build_diagrams.py --check --all   # 13 语言设计图：逐条量宽
+python3 scripts/i18n/sync_zh_readme.py --check  # zh 副本与根 README 同步
+```
+
+CI（`.github/workflows/ci.yml`）会跑上面全部内容：单测 PHP 8.2/8.3 矩阵、PHP 8.0/8.1 的语法底线、
+集成（含对服务容器里真实 etcd 的差分）、以及这三条文档校验。
+
 ## 架构与设计图
 
 三张图按「结构 → 能力 → 时序」组织，可点击单独查看：

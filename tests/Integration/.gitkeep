@@ -1,2 +1,6 @@
 Kept so a fresh clone has the directory phpunit.xml.dist points at (the
-`integration` testsuite). Real-cluster tests belong here.
+`integration` testsuite).
+
+The real-cluster coverage lives in tests/transport_test.php: run it with
+ETCD_REAL=<host:port> to execute the same cases against a live etcd and assert
+that the fixture and the real gateway agree.

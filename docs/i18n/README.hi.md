@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport, PSR HTTP स्टब्स
 ```
 
+## परीक्षण
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # यूनिट टेस्ट (इन-मेमोरी स्टब)
+
+# इंटीग्रेशन: सूट अपना नक़ली गेटवे साथ लाता है जो असली जैसा व्यवहार करता है (chunked फ़्रेमिंग + {"result":…} लिफ़ाफ़ा + int64 स्ट्रिंग में)
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**असली क्लस्टर पर सत्यापन (अनुशंसित):** उसी सूट को असली etcd का पता दें — वही केस चलेंगे और जाँचा जाएगा कि नक़ली और असली गेटवे एक जैसे हैं (फ़्रेमिंग, लिफ़ाफ़ा, int64 एन्कोडिंग):
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> यह क्यों ज़रूरी है: इस प्रोजेक्ट में एक बार कई खामियाँ (watch पूरी तरह बंद, बिना आर्ग्युमेंट वाले नौ मेथड 400,
+> keepAlive हमेशा थ्रो) 40+ टेस्ट हरे रहते हुए मौजूद थीं — स्टब और असली गेटवे **फ़्रेमिंग और लिफ़ाफ़े दोनों में**
+> अलग थे। वे ठीक हो चुकी हैं, और यही डिफ़रेंशियल मोड उसी तरह की खामियों को दोबारा निकलने से रोकता है।
+
+दस्तावेज़ और डायग्राम का मेल भी स्क्रिप्ट बनाए रखती हैं:
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13 अनुवाद: स्विचर, लिंक, कैटलॉग, फ़ेंस संरचना
+python3 scripts/i18n/build_diagrams.py --check --all   # 13 भाषाओं के डायग्राम: हर स्ट्रिंग नापी गई
+python3 scripts/i18n/sync_zh_readme.py --check  # zh प्रति रूट README के साथ सिंक
+```
+
+CI (`.github/workflows/ci.yml`) यह सब चलाता है: PHP 8.2/8.3 पर यूनिट टेस्ट, PHP 8.0/8.1 पर सिंटैक्स फ़्लोर, इंटीग्रेशन (सर्विस कंटेनर में असली etcd के विरुद्ध डिफ़रेंशियल सहित), और वे तीन दस्तावेज़ जाँचें।
+
 ## आर्किटेक्चर और डिज़ाइन आरेख
 
 तीनों आरेख «संरचना → क्षमता → क्रम» के क्रम में लगे हैं, हर एक अलग से देख सकते हैं:

@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport, stubs HTTP PSR
 ```
 
+## Tests
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # tests unitaires (stubs en mémoire)
+
+# intégration : la suite embarque sa propre passerelle factice qui reproduit la vraie (framing chunked + enveloppe {"result":…} + int64 en chaînes)
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**Vérification sur un vrai cluster (recommandée) :** donnez à la même suite l'adresse d'un etcd réel — elle exécute les mêmes cas et vérifie que la passerelle factice et la vraie concordent (framing, enveloppe, encodage int64) :
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> Pourquoi cela vaut la peine : ce projet a un jour porté une série de défauts (watch totalement inopérant, neuf
+> méthodes sans argument renvoyant 400, keepAlive levant toujours) alors que 40+ tests étaient verts — le fixture et
+> la vraie passerelle différaient **à la fois dans le framing et dans l'enveloppe**. Ils sont corrigés, et ce mode différentiel empêche la même classe de bug de repasser.
+
+La documentation et les schémas sont eux aussi tenus cohérents par des scripts :
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13 traductions : sélecteur, liens, catalogue, structure des blocs
+python3 scripts/i18n/build_diagrams.py --check --all   # schémas en 13 langues : chaque chaîne mesurée
+python3 scripts/i18n/sync_zh_readme.py --check  # copie zh synchronisée avec le README racine
+```
+
+La CI (`.github/workflows/ci.yml`) exécute tout cela : tests unitaires sur PHP 8.2/8.3, plancher syntaxique sur PHP 8.0/8.1, la suite d'intégration (dont le passage différentiel contre un etcd réel dans un conteneur de service) et les trois vérifications documentaires.
+
 ## Architecture et diagrammes
 
 Les trois diagrammes suivent l'ordre « structure → capacités → séquence » et sont consultables séparément :

@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport, PSR HTTP 스텁
 ```
 
+## 테스트
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # 단위 테스트(인메모리 스텁)
+
+# 통합: 실제 게이트웨이를 그대로 흉내 내는 자체 가짜 게이트웨이 포함(chunked 프레이밍 + {"result":…} 봉투 + int64 문자열)
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**실제 클러스터로 검증(권장):** 같은 스위트에 살아 있는 etcd 주소를 주면 같은 케이스를 실행하고 가짜 게이트웨이와 실제가 일치하는지(프레이밍·봉투·int64 인코딩) 확인합니다:
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> 왜 해볼 만한가: 이 프로젝트는 한때 40개 이상의 테스트가 초록인 상태에서 결함 묶음(watch 완전 불가,
+> 인자 없는 메서드 아홉 개가 400, keepAlive 항상 예외)을 안고 있었습니다. 원인은 스텁과 실제 게이트웨이가
+> **프레이밍과 봉투 양쪽에서** 달랐기 때문입니다. 모두 수정되었고, 이 차분 모드가 같은 부류의 버그를 막습니다.
+
+문서와 설계도의 일관성도 스크립트가 지킵니다:
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13개 번역: 전환기·링크·카탈로그·울타리 구조
+python3 scripts/i18n/build_diagrams.py --check --all   # 13개 언어 설계도: 모든 문자열 폭 측정
+python3 scripts/i18n/sync_zh_readme.py --check  # zh 사본이 루트 README와 동기화
+```
+
+CI(`.github/workflows/ci.yml`)가 위 전부를 실행합니다: PHP 8.2/8.3 단위 테스트, PHP 8.0/8.1 문법 하한, 통합(서비스 컨테이너의 실제 etcd 대상 차분 포함), 그리고 세 가지 문서 검사.
+
 ## 아키텍처와 설계도
 
 세 장의 그림은 「구조 → 능력 → 타이밍」 순으로 구성되어 있으며, 클릭하면 개별로 볼 수 있습니다:

@@ -592,6 +592,42 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport وبدائل PSR HTTP
 ```
 
+## الاختبارات
+
+```bash
+composer install
+vendor/bin/phpunit --no-coverage tests/Unit     # اختبارات وحدة (بدائل في الذاكرة)
+
+# التكامل: تُحضر المجموعة بوابتها الوهمية التي تحاكي الحقيقية (تأطير chunked + غلاف {"result":…} + int64 كسلاسل)
+php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+**التحقق على عنقود حقيقي (مستحسن):** أعطِ المجموعة نفسها عنوان etcd حقيقي — ستُشغّل الحالات ذاتها وتتحقق من تطابق البوابة الوهمية والحقيقية (التأطير، الغلاف، ترميز int64):
+
+```bash
+docker run -d --name etcd -p 2379:2379 quay.io/coreos/etcd:v3.5.17 \
+  /usr/local/bin/etcd --name n1 --data-dir /d \
+  --listen-client-urls http://0.0.0.0:2379 --advertise-client-urls http://127.0.0.1:2379 \
+  --listen-peer-urls http://0.0.0.0:2380 --initial-advertise-peer-urls http://127.0.0.1:2380 \
+  --initial-cluster n1=http://127.0.0.1:2380
+
+ETCD_REAL=127.0.0.1:2379 php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+```
+
+> لماذا يستحق ذلك: حمل هذا المشروع سابقًا مجموعة عيوب (watch معطّل تمامًا، تسع دوال بلا وسائط تُعيد 400،
+> keepAlive يرفع دائمًا) بينما 40+ اختبارًا ناجح — كان البديل والبوابة الحقيقية يختلفان **في التأطير والغلاف معًا**.
+> وقد أُصلحت، وهذا الوضع التفاضلي هو ما يمنع تكرار الصنف نفسه.
+
+تُحفظ أيضًا اتساق التوثيق والمخططات عبر سكربتات:
+
+```bash
+python3 scripts/i18n/check_translations.py      # 13 ترجمة: المبدّل، الروابط، الكتالوج، بنية الكتل
+python3 scripts/i18n/build_diagrams.py --check --all   # مخططات بـ 13 لغة: كل نص مقيس
+python3 scripts/i18n/sync_zh_readme.py --check  # نسخة zh متزامنة مع README الجذر
+```
+
+تُشغّل CI (`.github/workflows/ci.yml`) كل ما سبق: اختبارات وحدة على PHP 8.2/8.3، وحد أدنى نحوي على PHP 8.0/8.1، ومجموعة التكامل (مع تمرير تفاضلي مقابل etcd حقيقي في حاوية خدمة)، وتلك الفحوص الثلاثة للتوثيق.
+
 ## المعمارية والمخططات
 
 المخططات الثلاثة مرتّبة وفق «البنية ← القدرات ← التتابع الزمني»، ويمكن فتح كل منها على حدة:
