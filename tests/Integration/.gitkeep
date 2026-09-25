@@ -1,0 +1,2 @@
+Kept so a fresh clone has the directory phpunit.xml.dist points at (the
+`integration` testsuite). Real-cluster tests belong here.

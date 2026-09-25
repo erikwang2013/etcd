@@ -103,7 +103,7 @@ $etcd = new EtcdClient([
     'scheme'    => 'http',  // http (ডিফল্ট) | https
     'timeout'   => 5.0,     // সেকেন্ড
     'retry'     => 3,       // কানেকশন ব্যর্থ হলে রিট্রাই সংখ্যা
-    'auth'      => [        // ঐচ্ছিক, Basic Auth
+    'auth'      => [        // ঐচ্ছিক; ক্রেডেনশিয়াল token-এ বদলাতে https দরকার
         'user'     => 'root',
         'password' => 'secret',
     ],
@@ -157,6 +157,10 @@ $etcd->kv()->get('/start', [
     'serializable'=> true,            // Raft কনসেন্সাস বাদ (দ্রুত, তবে পুরনো হতে পারে)
     'keysOnly'    => true,            // শুধু key ফেরায়, value নয়
     'countOnly'   => false,           // শুধু সংখ্যা ফেরায়
+    'minModRevision'    => 100,       // এই revision বা তার পরের পরিবর্তিত key
+    'maxModRevision'    => 200,
+    'minCreateRevision' => 100,       // creation revision দিয়ে ফিল্টার
+    'maxCreateRevision' => 200,
 ]);
 
 // মুছে ফেলা
@@ -175,6 +179,20 @@ $etcd->kv()->txn(
     failure: [
         ['request_put' => ['key' => '/counter', 'value' => '1']]
     ]
+);
+
+// নেস্টেড ট্রানজেকশন: শাখার ভেতরে আরেকটি ট্রানজেকশন থাকতে পারে
+$etcd->kv()->txn(
+    compare: [['result' => 0, 'target' => 3, 'key' => '/lock', 'value' => 'free']],
+    success: [[
+        'request_put' => ['key' => '/lock', 'value' => 'mine'],
+        'request_txn' => [                       // ভেতরের ট্রানজেকশন
+            'compare' => [['result' => 0, 'target' => 1, 'key' => '/lock', 'create_revision' => 0]],
+            'success' => [['request_put' => ['key' => '/log', 'value' => 'acquired']]],
+            'failure' => [],
+        ],
+    ]],
+    failure: []
 );
 
 // পুরনো revision কম্প্যাক্ট (স্টোরেজ খালি করে)
@@ -203,7 +221,9 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
-**ডিসকানেক্টে রিকানেক্ট:** Watch কানেকশন কেটে গেলে শেষবার পাওয়া revision থেকেই স্বয়ংক্রিয়ভাবে সাবস্ক্রিপশন চালু হয়, কোনো ইভেন্ট হারায় না।
+**ডিসকানেক্টে রিকানেক্ট:** Watch কানেকশন কেটে গেলে `lastRevision + 1` থেকে আবার সাবস্ক্রাইব হয় (`start_revision` **সহগামী**, পুরোনো মান দিয়ে চালু করলে শেষ ইভেন্টটি আবার চলে আসে)। ফেলওভারে কোনো ইভেন্ট হারায় না, দুবারও পৌঁছায় না।
+
+**রিট্রাই নীতি:** কেবল সেই ব্যর্থতাই আবার চেষ্টা করা হয় যা প্রমাণ করে কানেকশনই তৈরি হয়নি (কানেকশন রিফিউজড / DNS ব্যর্থতা), আর শুধু-পাঠ RPC (range, status, memberlist ইত্যাদি) এর বাইরে 5xx ও টাইমআউটও সহ্য করে। লেখার কাজ 5xx বা পড়ার টাইমআউটে **আবার চেষ্টা করা হয় না** — অনুরোধ আগেই কার্যকর হয়ে থাকতে পারে, আর আবার চালালে CAS-এর মতো অনুরোধ দুবার প্রয়োগ হয়, বা "আত্মবিশ্বাসী ভুল উত্তর" মেলে (রিট্রাই নিজের প্রথম লেখাটি দেখে CAS ব্যর্থ বলে জানায়, অথচ সেটি জিতেছিল)।
 
 ### Lease — লিজ
 
@@ -260,7 +280,13 @@ $auth->disable();          // অথ বন্ধ
 $status = $auth->status(); // ['enabled' => true, 'authRevision' => 5]
 ```
 
-**লক্ষ্য করুন:** অথ চালু করার পর ক্লায়েন্টে অবশ্যই `auth.user` ও `auth.password` কনফিগ করা থাকতে হবে, নইলে কাজ চালানো যাবে না।
+**অথ কীভাবে হয়:** etcd v3 HTTP Basic গ্রহণ করে না — সে আগে ক্রেডেনশিয়াল token-এ বদলাতে বলে (`POST /v3/auth/authenticate`), তারপর token-টি কোনো উপসর্গ ছাড়া `Authorization: <token>` হিসেবে পাঠায় (`Bearer` উপসর্গও প্রত্যাখ্যাত হয়)। `auth.user` / `auth.password` সেট করলে ক্লায়েন্ট এটি **স্বয়ংক্রিয়ভাবে** করে এবং token ক্যাশ করে, 401 এলে একবার আবার অথ করে — হাতে কিছু কল করার দরকার নেই। আপনি নিজেও বদলাতে পারেন:
+
+```php
+$token = $etcd->auth()->authenticate('root', 'secret');  // পাওয়া token পরের রিকোয়েস্টগুলোতে পুনরায় ব্যবহৃত হয়
+```
+
+ক্রেডেনশিয়াল পাঠাতে `scheme => 'https'` দরকার: সাদা http-তে কনস্ট্রাক্টরই সরাসরি অস্বীকার করে (যাতে পাসওয়ার্ড কখনও খোলাখুলি না যায়)।
 
 ### Cluster — ক্লাস্টার ম্যানেজমেন্ট
 
@@ -310,13 +336,9 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 |------|------|------|---------|
 | **HTTP** | প্রস্তুত | ext-curl / stream / PSR-18 (যেকোনো একটি) | এক্সটেনশন ডিপেন্ডেন্সি ছাড়াই সাথে সাথে চলে |
 | **gRPC** | স্কেলিটন | ext-grpc + grpc/grpc + google/protobuf | উচ্চ পারফরম্যান্স, নেটিভ স্ট্রিমিং |
-| **auto** | ডিফল্ট | স্বয়ংক্রিয় সনাক্তকরণ | gRPC থাকলে gRPC, নইলে HTTP |
+| **auto** | ডিফল্ট | — | এখন `http`-এর সমান (নিচে দেখুন) |
 
-`auto` মোডের সনাক্তকরণ লজিক:
-1. `extension_loaded('grpc')` — C এক্সটেনশন লোড করা আছে?
-2. `class_exists('Grpc\BaseStub')` — `grpc/grpc` composer প্যাকেজ ইনস্টল করা আছে?
-
-দুটোই সত্যি হলে তবেই gRPC, নইলে HTTP-তে ফলব্যাক।
+`auto` আর `http` সমান: `GrpcTransport` এখনও স্কেলিটন (তিনটি মেথডই এক্সেপশন ছোড়ে), তাই এটি নিজে থেকে gRPC-তে **যায় না** — সত্যিই `ext-grpc` খোঁজা কেবল যাঁরা এক্সটেনশন ইনস্টল করেছেন তাঁদেরই অচল করে দিত। স্পষ্টভাবে `'transport' => 'grpc'` দিলেই এটি বেছে নেওয়া হয়। gRPC এলেই এই অর্থ বদলাবে।
 
 ### ম্যানুয়ালি PSR-18 HTTP ক্লায়েন্ট কনফিগার
 
@@ -468,7 +490,8 @@ try {
 ```
 erikwang2013/etcd/
 ├── composer.json                    # প্যাকেজ ডেফিনিশন: PSR-4 অটোলোড + Laravel / Hyperf অটো-ডিসকভারি
-├── phpunit.xml                      # PHPUnit কনফিগ (unit / integration দুটি স্যুট)
+├── phpunit.xml.dist                 # PHPUnit কনফিগ (unit / integration দুটি স্যুট)
+├── .github/workflows/ci.yml         # মার্জের আগে গেট: ইউনিট ম্যাট্রিক্স / সিনট্যাক্স বেসলাইন / ইন্টিগ্রেশন / i18n ডক্স
 ├── config/etcd.php                  # ডিফল্ট কনফিগ, ফ্রেমওয়ার্কে পাবলিশের জন্য (ETCD_* এনভায়রনমেন্ট ভেরিয়েবল পড়ে)
 ├── .github/workflows/release.yml    # tag দিলে স্বয়ংক্রিয় পাবলিশ
 ├── scripts/i18n/                    #   ডক্স টুলিং: ক্যাটালগ, ডায়াগ্রাম বিল্ডার, অনুবাদ যাচাই
@@ -498,10 +521,7 @@ erikwang2013/etcd/
 │   ├── Cluster/ClusterClient.php    # Cluster ক্লাস্টার সদস্য ম্যানেজমেন্ট
 │   ├── Maintenance/                 # Maintenance অপারেশনস: status / alarm / defrag / snapshot
 │   ├── Exception/                   # এক্সেপশন হায়ারার্কি
-│   ├── Protobuf/                    # মেসেজ স্টাব (সাধারণ PHP ডেটা ক্লাস, Message এক্সটেন্ড করে না)
-│   │   ├── Mvccpb/                  #   KeyValue, Event
-│   │   ├── Etcdserverpb/            #   60+ রিকোয়েস্ট / রেসপন্স মেসেজ
-│   │   └── Authpb/                  #   User, Role, Permission
+│   ├── Support/KeyValue.php         # শেয়ারড ডিকোডিং: KV পড়া ও watch ইভেন্ট একই আকার ফেরায়
 │   └── Adapter/                     # ফ্রেমওয়ার্ক অ্যাডাপ্টার
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider

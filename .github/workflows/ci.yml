@@ -1,0 +1,122 @@
+name: CI
+
+# Pull requests and branch pushes only. Pushes to main are owned by
+# release.yml, which runs the unit suite before tagging.
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit tests (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # phpunit/phpunit ^11 requires PHP >= 8.2, so the suite cannot run on
+        # the 8.0/8.1 floor; the floor job below covers those.
+        php: ['8.2', '8.3']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      # A fresh checkout has no composer.lock (it is gitignored), so --strict
+      # has nothing stale to complain about.
+      - name: Validate composer.json
+        run: composer validate --strict --no-check-publish
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Run unit tests
+        run: vendor/bin/phpunit --no-coverage tests/Unit
+
+  floor:
+    name: Syntax floor (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.0', '8.1']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+
+      # composer.json declares php >=8.0 but the dev toolchain cannot install
+      # there, so lint every shipped file with the floor's own parser: this is
+      # what catches 8.1-only syntax creeping into src/.
+      - name: Lint src/
+        run: find src -name '*.php' -print0 | xargs -0 -n1 php -l
+
+  integration:
+    name: HTTP transport integration
+    runs-on: ubuntu-latest
+    services:
+      etcd:
+        image: quay.io/coreos/etcd:v3.5.17
+        env:
+          # Without these etcd only serves gRPC; the client speaks HTTP.
+          ETCD_NAME: default
+          ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+          ETCD_ADVERTISE_CLIENT_URLS: http://127.0.0.1:2379
+        ports:
+          - 2379:2379
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Wait for etcd
+        run: curl -fsS --retry 10 --retry-delay 1 --retry-connrefused http://127.0.0.1:2379/health
+
+      # The suite spins up its own faithful fake gateway; ETCD_REAL additionally
+      # runs the same cases against the service container and asserts that the
+      # fixture and the real gateway agree (framing, envelopes, int64 strings).
+      - name: Transport integration (fixture)
+        run: php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+
+      - name: Transport integration (against real etcd)
+        env:
+          ETCD_REAL: 127.0.0.1:2379
+        run: |
+          php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php
+          # a differential case must actually have run
+          php -d zend.assertions=1 -d assert.exception=1 tests/transport_test.php | grep -q 'differential:'
+
+  docs:
+    name: i18n docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Stdlib only, no pip install needed. All three exit non-zero on drift.
+      - name: Diagram layout
+        run: python3 scripts/i18n/build_diagrams.py --check --all
+
+      - name: Translated READMEs, links and catalogs
+        run: python3 scripts/i18n/check_translations.py
+
+      - name: docs/i18n/README.zh.md matches README.md
+        run: python3 scripts/i18n/sync_zh_readme.py --check

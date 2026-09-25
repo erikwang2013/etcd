@@ -10,6 +10,13 @@ declare(strict_types=1);
  * SPDX-License-Identifier: MIT
  */
 
+/**
+ * NOTE: implementing this transport needs message stubs generated from etcd's
+ * rpc.proto (protoc --php_out). The hand-written src/Protobuf/ stubs were removed:
+ * no wire (de)serialization, 64-bit fields typed int where the gateway sends
+ * strings (uint64 overflows PHP int), enums typed int where the gateway sends names.
+ */
+
 namespace Erikwang2013\Etcd\Transport;
 
 use Erikwang2013\Etcd\Exception\ConnectionException;
@@ -27,12 +34,12 @@ class GrpcTransport implements TransportInterface
         $this->currentEndpoint = $endpoints[0];
     }
 
-    public function send(string $path, array $body): array
+    public function send(string $path, array $body, ?float $timeout = null): array
     {
         throw new ConnectionException('gRPC transport send() not yet implemented. Use HTTP transport or implement gRPC service stubs.');
     }
 
-    public function sendRaw(string $path): string
+    public function sendRaw(string $path, ?float $timeout = null): string
     {
         throw new ConnectionException('gRPC transport sendRaw() not yet implemented. Use HTTP transport.');
     }

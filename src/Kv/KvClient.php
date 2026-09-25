@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace Erikwang2013\Etcd\Kv;
 
 use Erikwang2013\Etcd\Transport\TransportInterface;
+use Erikwang2013\Etcd\Support\KeyValue;
 use Erikwang2013\Etcd\EtcdClient;
 
 class KvClient
@@ -64,46 +65,15 @@ class KvClient
      *   - 'serializable' => bool  Serializable read (no consensus, faster)
      *   - 'keysOnly'   => bool    Only return keys (no values)
      *   - 'countOnly'  => bool    Only return count
+     *   - 'minModRevision'    => int  Only KVs modified at or after this revision
+     *   - 'maxModRevision'    => int  Only KVs modified at or before this revision
+     *   - 'minCreateRevision' => int  Only KVs created at or after this revision
+     *   - 'maxCreateRevision' => int  Only KVs created at or before this revision
      * @return array  ['header' => [...], 'kvs' => [...], 'count' => int, 'more' => bool]
      */
     public function get(string $key, array $options = []): array
     {
-        $body = ['key' => base64_encode($key)];
-
-        if (!empty($options['rangeEnd'])) {
-            $body['range_end'] = base64_encode($options['rangeEnd']);
-        }
-        if (isset($options['limit'])) {
-            $body['limit'] = (int) $options['limit'];
-        }
-        if (isset($options['revision'])) {
-            $body['revision'] = (int) $options['revision'];
-        }
-        if (!empty($options['sortOrder'])) {
-            $orderMap = ['none' => 0, 'ascend' => 1, 'descend' => 2];
-            if (!isset($orderMap[$options['sortOrder']])) {
-                throw new \InvalidArgumentException("Invalid sortOrder: {$options['sortOrder']}");
-            }
-            $body['sort_order'] = $orderMap[$options['sortOrder']];
-        }
-        if (!empty($options['sortTarget'])) {
-            $targetMap = ['key' => 0, 'version' => 1, 'create' => 2, 'mod' => 3, 'value' => 4];
-            if (!isset($targetMap[$options['sortTarget']])) {
-                throw new \InvalidArgumentException("Invalid sortTarget: {$options['sortTarget']}");
-            }
-            $body['sort_target'] = $targetMap[$options['sortTarget']];
-        }
-        if (!empty($options['serializable'])) {
-            $body['serializable'] = true;
-        }
-        if (!empty($options['keysOnly'])) {
-            $body['keys_only'] = true;
-        }
-        if (!empty($options['countOnly'])) {
-            $body['count_only'] = true;
-        }
-
-        $response = $this->transport->send('/v3/kv/range', $body);
+        $response = $this->transport->send('/v3/kv/range', $this->rangeBody($key, $options));
         return $this->decodeRangeResponse($response);
     }
 
@@ -126,6 +96,10 @@ class KvClient
      */
     public function getOrFail(string $key, array $options = []): array
     {
+        // Only kvs[0] is ever returned, so asking for more is pure waste: on a
+        // prefix this is one key read instead of the whole range.
+        $options['limit'] = 1;
+
         $result = $this->get($key, $options);
         if (empty($result['kvs'])) {
             throw new \Erikwang2013\Etcd\Exception\KeyNotFoundException("Key not found: {$key}");
@@ -167,19 +141,22 @@ class KvClient
      * Execute a transaction.
      *
      * @param array $compare   List of Compare arrays: [['result' => 0, 'target' => 0, 'key' => '', 'version' => 0], ...]
-     * @param array $success   List of RequestOp: [['request_put' => ['key' => ..., 'value' => ...]], ...]
+     * @param array $success   List of RequestOp. An op is one of
+     *                         ['request_put' => ['key', 'value', 'lease', 'prevKv', 'ignoreValue', 'ignoreLease']],
+     *                         ['request_range' => ['key', 'rangeEnd'|'range_end', ...get() options]],
+     *                         ['request_delete_range' => ['key', 'rangeEnd'|'range_end', 'prevKv']],
+     *                         ['request_txn' => ['compare' => [...], 'success' => [...], 'failure' => [...]]]
+     *                         — the last one nests another txn in this branch.
      * @param array $failure   List of RequestOp (fallback if compare fails)
      * @return array  ['header' => [...], 'succeeded' => bool, 'responses' => [...]]
      */
     public function txn(array $compare, array $success, array $failure = []): array
     {
-        $body = [
-            'compare' => $this->encodeComparisons($compare),
-            'success' => $this->encodeRequestOps($success),
-            'failure' => $this->encodeRequestOps($failure),
-        ];
-
-        $response = $this->transport->send('/v3/kv/txn', $body);
+        $response = $this->transport->send('/v3/kv/txn', $this->encodeTxn([
+            'compare' => $compare,
+            'success' => $success,
+            'failure' => $failure,
+        ]));
         return $this->decodeTxnResponse($response);
     }
 
@@ -197,6 +174,67 @@ class KvClient
     }
 
     // --- Internal helpers ---
+
+    /**
+     * The one place that turns range options into a RangeRequest body, shared by
+     * get() and by a txn 'request_range' op so neither path can silently drop
+     * options the other accepts.
+     *
+     * @param array $o Options as get() takes them. A txn op may also spell the
+     *                 range end as 'range_end', which is its own wire field name.
+     * @return array RangeRequest body, keys and values base64-encoded
+     */
+    private function rangeBody(string $key, array $o): array
+    {
+        $body = ['key' => base64_encode($key)];
+
+        $rangeEnd = $this->rangeEndOf($o);
+        if ($rangeEnd !== '') {
+            $body['range_end'] = base64_encode($rangeEnd);
+        }
+        foreach (['limit', 'revision'] as $field) {
+            if (isset($o[$field])) {
+                $body[$field] = (int) $o[$field];
+            }
+        }
+        foreach ([
+            'minModRevision'    => 'min_mod_revision',
+            'maxModRevision'    => 'max_mod_revision',
+            'minCreateRevision' => 'min_create_revision',
+            'maxCreateRevision' => 'max_create_revision',
+        ] as $option => $field) {
+            if (isset($o[$option])) {
+                $body[$field] = (int) $o[$option];
+            }
+        }
+        foreach ([
+            'sortOrder'  => ['sort_order', ['none' => 0, 'ascend' => 1, 'descend' => 2]],
+            'sortTarget' => ['sort_target', ['key' => 0, 'version' => 1, 'create' => 2, 'mod' => 3, 'value' => 4]],
+        ] as $option => [$field, $allowed]) {
+            if (empty($o[$option])) {
+                continue;
+            }
+            if (!isset($allowed[$o[$option]])) {
+                throw new \InvalidArgumentException("Invalid {$option}: {$o[$option]}");
+            }
+            $body[$field] = $allowed[$o[$option]];
+        }
+        if (!empty($o['serializable'])) {
+            $body['serializable'] = true;
+        }
+        foreach (['keysOnly' => 'keys_only', 'countOnly' => 'count_only'] as $option => $field) {
+            if (!empty($o[$option])) {
+                $body[$field] = true;
+            }
+        }
+
+        return $body;
+    }
+
+    private function rangeEndOf(array $o): string
+    {
+        return (string) ($o['rangeEnd'] ?? $o['range_end'] ?? '');
+    }
 
     private function decodeRangeResponse(array $r): array
     {
@@ -260,14 +298,8 @@ class KvClient
 
     private function decodeKv(array $kv): array
     {
-        return [
-            'key'              => ($d = base64_decode($kv['key'] ?? '', true)) !== false ? $d : ($kv['key'] ?? ''),
-            'value'            => array_key_exists('value', $kv) ? (($d = base64_decode($kv['value'], true)) !== false ? $d : $kv['value']) : null,
-            'create_revision'  => (int) ($kv['create_revision'] ?? 0),
-            'mod_revision'     => (int) ($kv['mod_revision'] ?? 0),
-            'version'          => (int) ($kv['version'] ?? 0),
-            'lease'            => (int) ($kv['lease'] ?? 0),
-        ];
+        // shared with the watch path so both return the same types
+        return KeyValue::decode($kv);
     }
 
     private function encodeComparisons(array $compares): array
@@ -292,32 +324,52 @@ class KvClient
         }, $compares);
     }
 
+    private function encodeTxn(array $txn): array
+    {
+        return [
+            'compare' => $this->encodeComparisons($txn['compare'] ?? []),
+            'success' => $this->encodeRequestOps($txn['success'] ?? []),
+            'failure' => $this->encodeRequestOps($txn['failure'] ?? []),
+        ];
+    }
+
     private function encodeRequestOps(array $ops): array
     {
         return array_map(function ($op) {
             if (isset($op['request_put'])) {
+                $put = $op['request_put'];
                 $r = [
-                    'key'   => base64_encode($op['request_put']['key'] ?? ''),
-                    'value' => base64_encode($op['request_put']['value'] ?? ''),
+                    'key'   => base64_encode($put['key'] ?? ''),
+                    'value' => base64_encode($put['value'] ?? ''),
                 ];
-                if (isset($op['request_put']['lease'])) {
-                    $r['lease'] = $op['request_put']['lease'];
+                if (isset($put['lease'])) {
+                    $r['lease'] = $put['lease'];
+                }
+                foreach (['prevKv' => 'prev_kv', 'ignoreValue' => 'ignore_value', 'ignoreLease' => 'ignore_lease'] as $option => $field) {
+                    if (!empty($put[$option])) {
+                        $r[$field] = true;
+                    }
                 }
                 return ['request_put' => $r];
             }
             if (isset($op['request_range'])) {
-                $r = ['key' => base64_encode($op['request_range']['key'] ?? '')];
-                if (isset($op['request_range']['range_end'])) {
-                    $r['range_end'] = base64_encode($op['request_range']['range_end']);
-                }
-                return ['request_range' => $r];
+                $range = $op['request_range'];
+                return ['request_range' => $this->rangeBody((string) ($range['key'] ?? ''), $range)];
             }
             if (isset($op['request_delete_range'])) {
-                $r = ['key' => base64_encode($op['request_delete_range']['key'] ?? '')];
-                if (isset($op['request_delete_range']['range_end'])) {
-                    $r['range_end'] = base64_encode($op['request_delete_range']['range_end']);
+                $delete = $op['request_delete_range'];
+                $r = ['key' => base64_encode($delete['key'] ?? '')];
+                $rangeEnd = $this->rangeEndOf($delete);
+                if ($rangeEnd !== '') {
+                    $r['range_end'] = base64_encode($rangeEnd);
+                }
+                if (!empty($delete['prevKv'])) {
+                    $r['prev_kv'] = true;
                 }
                 return ['request_delete_range' => $r];
+            }
+            if (isset($op['request_txn'])) {
+                return ['request_txn' => $this->encodeTxn($op['request_txn'])];
             }
             return $op;
         }, $ops);

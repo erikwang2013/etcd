@@ -120,7 +120,7 @@ $etcd = new EtcdClient([
     'scheme'    => 'http',  // http（默认）| https
     'timeout'   => 5.0,     // 秒
     'retry'     => 3,       // 连接失败重试次数
-    'auth'      => [        // 可选，Basic Auth
+    'auth'      => [        // 可选；凭据换 token 需要 https
         'user'     => 'root',
         'password' => 'secret',
     ],
@@ -174,6 +174,10 @@ $etcd->kv()->get('/start', [
     'serializable'=> true,            // 跳过 Raft 共识（更快，可能过期）
     'keysOnly'    => true,            // 只返回 key，不返回 value
     'countOnly'   => false,           // 只返回计数
+    'minModRevision'    => 100,       // 只要修改版本 >= 100 的
+    'maxModRevision'    => 200,
+    'minCreateRevision' => 100,       // 按创建版本过滤
+    'maxCreateRevision' => 200,
 ]);
 
 // 删除
@@ -192,6 +196,20 @@ $etcd->kv()->txn(
     failure: [
         ['request_put' => ['key' => '/counter', 'value' => '1']]
     ]
+);
+
+// 嵌套事务：分支里可以再放事务
+$etcd->kv()->txn(
+    compare: [['result' => 0, 'target' => 3, 'key' => '/lock', 'value' => 'free']],
+    success: [[
+        'request_put' => ['key' => '/lock', 'value' => 'mine'],
+        'request_txn' => [                       // 内层事务
+            'compare' => [['result' => 0, 'target' => 1, 'key' => '/lock', 'create_revision' => 0]],
+            'success' => [['request_put' => ['key' => '/log', 'value' => 'acquired']]],
+            'failure' => [],
+        ],
+    ]],
+    failure: []
 );
 
 // 压缩历史版本（释放存储空间）
@@ -220,7 +238,12 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
-**断线重连：** Watch 连接断开时自动从上一次收到的 revision 续订，不会丢失事件。
+**断线重连：** Watch 连接断开时自动从 `lastRevision + 1` 续订（`start_revision` 是**闭区间**语义，
+用原值续订会重放最后一个事件）。故障转移不丢事件，也不重复投递。
+
+**重试策略：** 只有**连接根本没建立**（拒绝连接 / DNS 失败）才会重试，且只读接口（range、status、memberlist 等）
+额外容忍 5xx 与超时。写操作遇到 5xx 或读超时**不重试**——那可能已经生效，重放会让 CAS 这类请求被应用两次，
+甚至拿到一个"自信的错答案"（重试看到自己第一次写入的结果，报告 CAS 失败而它其实赢了）。
 
 ### Lease — 租约
 
@@ -277,7 +300,16 @@ $auth->disable();          // 关闭认证
 $status = $auth->status(); // ['enabled' => true, 'authRevision' => 5]
 ```
 
-**注意：** 开启认证后，客户端必须配置 `auth.user` 和 `auth.password` 才能继续操作。
+**认证是怎么发生的：** etcd v3 不接受 HTTP Basic —— 它要求先用凭据换取 token
+（`POST /v3/auth/authenticate`），随后以裸 token 发送 `Authorization: <token>`（加 `Bearer` 前缀同样会被拒）。
+配置了 `auth.user` / `auth.password` 后，客户端会**自动**完成这一步并缓存 token，401 时自动重新认证一次，
+无需手工调用。也可以自己换：
+
+```php
+$token = $etcd->auth()->authenticate('root', 'secret');  // 换到的 token 会被后续请求复用
+```
+
+发送凭据需要 `scheme => 'https'`：明文 http 下构造函数会直接拒绝（避免密码裸奔）。
 
 ### Cluster — 集群管理
 
@@ -327,13 +359,9 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 |------|------|------|---------|
 | **HTTP** | 可用 | ext-curl / 流封装 / PSR-18 任选其一 | 零扩展依赖，即刻可用 |
 | **gRPC** | 骨架 | ext-grpc + grpc/grpc + google/protobuf | 高性能、原生流式 |
-| **auto** | 默认 | 自动检测 | 有 gRPC 则用 gRPC，否则 HTTP |
+| **auto** | 默认 | — | 目前等同 `http`（见下） |
 
-`auto` 模式检测逻辑：
-1. `extension_loaded('grpc')` — C 扩展已加载？
-2. `class_exists('Grpc\BaseStub')` — `grpc/grpc` composer 包已安装？
-
-两者都满足才走 gRPC，否则回退 HTTP。
+`auto` 与 `http` 等价：`GrpcTransport` 仍是骨架（三个方法都抛异常），所以**不会**自动切到 gRPC——真去探测 `ext-grpc` 只会让装了扩展的用户直接不可用。显式传 `'transport' => 'grpc'` 才会选中它。gRPC 落地后，这里的语义才会变。
 
 ### 手动配置 PSR-18 HTTP 客户端
 
@@ -485,7 +513,8 @@ try {
 ```
 erikwang2013/etcd/
 ├── composer.json                    # 包定义：PSR-4 自动加载 + Laravel / Hyperf 自动发现
-├── phpunit.xml                      # PHPUnit 配置（unit / integration 两套套件）
+├── phpunit.xml.dist                 # PHPUnit 配置（unit / integration 两套套件）
+├── .github/workflows/ci.yml         # 合并前门禁：单测矩阵 / 语法底线 / 集成 / i18n 文档
 ├── config/etcd.php                  # 默认配置，供各框架发布（读取 ETCD_* 环境变量）
 ├── .github/workflows/release.yml    # 打 tag 时自动发布
 ├── scripts/i18n/                    #   文档工具：词条目录、设计图生成、翻译校验
@@ -515,10 +544,7 @@ erikwang2013/etcd/
 │   ├── Cluster/ClusterClient.php    # Cluster 集群成员管理
 │   ├── Maintenance/                 # Maintenance 运维：status / alarm / defrag / snapshot
 │   ├── Exception/                   # 异常层次
-│   ├── Protobuf/                    # 消息桩（纯 PHP 数据类，不继承 Message）
-│   │   ├── Mvccpb/                  #   KeyValue、Event
-│   │   ├── Etcdserverpb/            #   60+ 请求 / 响应消息
-│   │   └── Authpb/                  #   User、Role、Permission
+│   ├── Support/KeyValue.php         # 共用解码：KV 读取与 watch 事件返回同一形状
 │   └── Adapter/                     # 框架适配器
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider

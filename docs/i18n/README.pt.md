@@ -103,7 +103,7 @@ $etcd = new EtcdClient([
     'scheme'    => 'http',  // http (padrão) | https
     'timeout'   => 5.0,     // segundos
     'retry'     => 3,       // tentativas em falha de conexão
-    'auth'      => [        // opcional, Basic Auth
+    'auth'      => [        // opcional; trocar as credenciais por um token exige https
         'user'     => 'root',
         'password' => 'secret',
     ],
@@ -157,6 +157,10 @@ $etcd->kv()->get('/start', [
     'serializable'=> true,            // pula o consenso Raft (mais rápido, pode estar desatualizado)
     'keysOnly'    => true,            // só keys, sem values
     'countOnly'   => false,           // somente a contagem
+    'minModRevision'    => 100,       // só keys modificadas a partir desta revisão
+    'maxModRevision'    => 200,
+    'minCreateRevision' => 100,       // filtrar por revisão de criação
+    'maxCreateRevision' => 200,
 ]);
 
 // exclui
@@ -175,6 +179,20 @@ $etcd->kv()->txn(
     failure: [
         ['request_put' => ['key' => '/counter', 'value' => '1']]
     ]
+);
+
+// transação aninhada: um ramo pode conter outra transação
+$etcd->kv()->txn(
+    compare: [['result' => 0, 'target' => 3, 'key' => '/lock', 'value' => 'free']],
+    success: [[
+        'request_put' => ['key' => '/lock', 'value' => 'mine'],
+        'request_txn' => [                       // transação interna
+            'compare' => [['result' => 0, 'target' => 1, 'key' => '/lock', 'create_revision' => 0]],
+            'success' => [['request_put' => ['key' => '/log', 'value' => 'acquired']]],
+            'failure' => [],
+        ],
+    ]],
+    failure: []
 );
 
 // compacta o histórico (libera espaço)
@@ -203,7 +221,9 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
-**Reconexão:** quando a conexão do watch cai, ela se reinscreve automaticamente a partir da última revisão vista, sem perder eventos.
+**Reconexão:** quando a conexão do watch cai, ela se reinscreve a partir de `lastRevision + 1` (`start_revision` é **inclusivo**, retomar com o valor antigo reproduziria o último evento). O failover não perde eventos nem os entrega duas vezes.
+
+**Política de retentativas:** só são repetidas as falhas que provam que a conexão nunca chegou a ser estabelecida (conexão recusada / falha de DNS), e RPCs somente leitura (range, status, memberlist etc.) toleram ainda 5xx e timeouts. Escritas que recebem 5xx ou timeout de leitura **não** são repetidas — a requisição pode já ter surtido efeito, e repeti-la aplica um CAS duas vezes ou até devolve uma «resposta falsamente confiante» (a retentativa vê a própria primeira escrita e relata um CAS que falhou quando na verdade venceu).
 
 ### Lease — TTL
 
@@ -260,7 +280,13 @@ $auth->disable();          // desliga a autenticação
 $status = $auth->status(); // ['enabled' => true, 'authRevision' => 5]
 ```
 
-**Atenção:** com a autenticação ligada, o cliente precisa de `auth.user` e `auth.password` configurados para continuar operando.
+**Como a autenticação acontece:** o etcd v3 não aceita HTTP Basic — ele exige primeiro trocar as credenciais por um token (`POST /v3/auth/authenticate`) e depois enviar o token puro em `Authorization: <token>` (um prefixo `Bearer` também é recusado). Com `auth.user` / `auth.password` configurados, o cliente faz isso **automaticamente** e guarda o token em cache, reautenticando uma vez em um 401, sem chamada manual. Você também pode trocar por conta própria:
+
+```php
+$token = $etcd->auth()->authenticate('root', 'secret');  // o token obtido é reutilizado nas requisições seguintes
+```
+
+Enviar credenciais exige `scheme => 'https'`: em http puro o construtor recusa de imediato (para a senha nunca trafegar em claro).
 
 ### Cluster — gerenciamento do cluster
 
@@ -310,13 +336,9 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 |------|--------|------|---------|
 | **HTTP** | disponível | ext-curl / streams / PSR-18 (qualquer um) | zero dependências de extensão, funciona na hora |
 | **gRPC** | esqueleto | ext-grpc + grpc/grpc + google/protobuf | alta vazão, streaming nativo |
-| **auto** | padrão | detecção automática | gRPC quando disponível, senão HTTP |
+| **auto** | padrão | — | hoje equivale a `http` (veja abaixo) |
 
-Como o modo `auto` decide:
-1. `extension_loaded('grpc')` — a extensão C está carregada?
-2. `class_exists('Grpc\BaseStub')` — o pacote composer `grpc/grpc` está instalado?
-
-Só quando os dois valem ele usa gRPC; caso contrário, cai para HTTP.
+`auto` equivale a `http`: `GrpcTransport` ainda é um esqueleto (os três métodos lançam exceção), então ele **não** muda para gRPC sozinho — sondar de fato `ext-grpc` só deixaria sem uso quem tem a extensão instalada. Apenas um `'transport' => 'grpc'` explícito o seleciona. Quando o gRPC chegar, essa semântica muda.
 
 ### Configurar um cliente HTTP PSR-18 manualmente
 
@@ -468,7 +490,8 @@ try {
 ```
 erikwang2013/etcd/
 ├── composer.json                    # definição do pacote: autoload PSR-4 + descoberta Laravel / Hyperf
-├── phpunit.xml                      # config do PHPUnit (suítes unit / integration)
+├── phpunit.xml.dist                 # config do PHPUnit (suítes unit / integration)
+├── .github/workflows/ci.yml         # portão antes do merge: matriz unit / base de sintaxe / integração / docs i18n
 ├── config/etcd.php                  # config padrão publicada em cada framework (lê as variáveis ETCD_*)
 ├── .github/workflows/release.yml    # publicação automática ao criar a tag
 ├── scripts/i18n/                    #   ferramentas de docs: catálogos, gerador de diagramas, verificação
@@ -498,10 +521,7 @@ erikwang2013/etcd/
 │   ├── Cluster/ClusterClient.php    # gerenciamento de membros do cluster
 │   ├── Maintenance/                 # operações: status / alarm / defrag / snapshot
 │   ├── Exception/                   # hierarquia de exceções
-│   ├── Protobuf/                    # stubs de mensagem (classes PHP puras, sem herdar de Message)
-│   │   ├── Mvccpb/                  #   KeyValue, Event
-│   │   ├── Etcdserverpb/            #   60+ mensagens de requisição / resposta
-│   │   └── Authpb/                  #   User, Role, Permission
+│   ├── Support/KeyValue.php         # decodificação compartilhada: leitura KV e eventos de watch devolvem a mesma forma
 │   └── Adapter/                     # adaptadores de framework
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider

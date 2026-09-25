@@ -103,7 +103,7 @@ $etcd = new EtcdClient([
     'scheme'    => 'http',  // http(افتراضي)| https
     'timeout'   => 5.0,     // ثوانٍ
     'retry'     => 3,       // عدد محاولات إعادة الاتصال
-    'auth'      => [        // اختياري، Basic Auth
+    'auth'      => [        // اختياري؛ تبديل بيانات الاعتماد بـ token يتطلب https
         'user'     => 'root',
         'password' => 'secret',
     ],
@@ -157,6 +157,10 @@ $etcd->kv()->get('/start', [
     'serializable'=> true,            // تخطي توافق Raft (أسرع، وقد يكون قديمًا)
     'keysOnly'    => true,            // إرجاع المفاتيح فقط دون القيم
     'countOnly'   => false,           // إرجاع العدد فقط
+    'minModRevision'    => 100,       // مفاتيح معدّلة من هذا الإصدار فصاعدًا فقط
+    'maxModRevision'    => 200,
+    'minCreateRevision' => 100,       // تصفية حسب إصدار الإنشاء
+    'maxCreateRevision' => 200,
 ]);
 
 // حذف
@@ -175,6 +179,20 @@ $etcd->kv()->txn(
     failure: [
         ['request_put' => ['key' => '/counter', 'value' => '1']]
     ]
+);
+
+// معاملة متداخلة: يمكن أن يحتوي الفرع على معاملة أخرى
+$etcd->kv()->txn(
+    compare: [['result' => 0, 'target' => 3, 'key' => '/lock', 'value' => 'free']],
+    success: [[
+        'request_put' => ['key' => '/lock', 'value' => 'mine'],
+        'request_txn' => [                       // معاملة داخلية
+            'compare' => [['result' => 0, 'target' => 1, 'key' => '/lock', 'create_revision' => 0]],
+            'success' => [['request_put' => ['key' => '/log', 'value' => 'acquired']]],
+            'failure' => [],
+        ],
+    ]],
+    failure: []
 );
 
 // ضغط الإصدارات القديمة (تحرير المساحة)
@@ -203,7 +221,9 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
-**إعادة الاتصال بعد الانقطاع:** عند انقطاع اتصال Watch يُستأنف تلقائيًا من آخر revision تم استلامه، فلا تُفقد أي أحداث.
+**إعادة الاتصال بعد الانقطاع:** عند انقطاع اتصال Watch يُعاد الاشتراك من `lastRevision + 1` (`start_revision` **شامل**، فالاستئناف بالقيمة القديمة يعيد تشغيل الحدث الأخير). وعند التبديل الاحتياطي لا تُفقد أحداث ولا تُسلَّم مرتين.
+
+**سياسة إعادة المحاولة:** لا تُعاد إلا الأعطال التي تُثبت أن الاتصال لم يُنشأ أصلًا (رفض الاتصال / فشل DNS)، وتتحمّل استدعاءات القراءة فقط (range، status، memberlist وغيرها) إضافةً إلى ذلك 5xx والمهلات. أما عمليات الكتابة فلا تُعاد عند 5xx أو مهلة القراءة — فقد تكون نُفّذت فعلًا، وإعادة تشغيلها تُطبّق CAS مرتين، أو حتى تُعيد «إجابة واثقة لكنها خاطئة» (ترى إعادة المحاولة كتابتها الأولى فتعلن فشل CAS وقد كانت في الحقيقة هي الرابحة).
 
 ### Lease — الإيجار
 
@@ -260,7 +280,13 @@ $auth->disable();          // تعطيل المصادقة
 $status = $auth->status(); // ['enabled' => true, 'authRevision' => 5]
 ```
 
-**ملاحظة:** بعد تفعيل المصادقة، يجب ضبط `auth.user` و`auth.password` في العميل لمواصلة العمل.
+**كيف تتم المصادقة:** لا يقبل etcd v3 بروتوكول HTTP Basic — بل يطلب أولًا تبديل بيانات الاعتماد بـ token (`POST /v3/auth/authenticate`)، ثم إرسال الـ token كما هو في `Authorization: <token>` (وتُرفض أيضًا إضافة البادئة `Bearer`). بعد ضبط `auth.user` / `auth.password` يقوم العميل بذلك **تلقائيًا** ويخزّن الـ token، ويعيد المصادقة مرة واحدة عند 401، دون أي استدعاء يدوي. ويمكنك التبديل بنفسك أيضًا:
+
+```php
+$token = $etcd->auth()->authenticate('root', 'secret');  // يُعاد استخدام الـ token الذي تم الحصول عليه في الطلبات اللاحقة
+```
+
+إرسال بيانات الاعتماد يتطلب `scheme => 'https'`: مع http المكشوف يرفض المُنشئ ذلك فورًا (حتى لا تنتقل كلمة المرور مكشوفة أبدًا).
 
 ### Cluster — إدارة العنقود
 
@@ -310,13 +336,9 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 |------|------|------|---------|
 | **HTTP** | متاح | ext-curl / stream / PSR-18 (أي واحد) | بلا اعتماد على أي امتداد، وجاهز فورًا |
 | **gRPC** | هيكل | ext-grpc + grpc/grpc + google/protobuf | أداء عالٍ وبث أصلي |
-| **auto** | افتراضي | اكتشاف تلقائي | gRPC إن توفر، وإلا HTTP |
+| **auto** | افتراضي | — | مطابق حاليًا لـ `http` (انظر أدناه) |
 
-منطق الاكتشاف في وضع `auto`:
-1. `extension_loaded('grpc')` — هل امتداد C محمّل؟
-2. `class_exists('Grpc\BaseStub')` — هل حزمة composer ‏`grpc/grpc` مثبتة؟
-
-لا يُسلك مسار gRPC إلا عند تحقق الشرطين معًا، وإلا يُستخدم HTTP.
+`auto` يكافئ `http`: فـ`GrpcTransport` ما زال هيكلًا (الطرق الثلاث ترمي استثناءً)، لذلك **لا** يتحوّل تلقائيًا إلى gRPC — والتحقق الفعلي من `ext-grpc` لن يجعل من ثبّت الامتداد إلا غير قادر على الاستخدام. لا يُختار إلا بتمرير `'transport' => 'grpc'` صراحةً. وعندما يُنجز gRPC سيتغيّر هذا المعنى.
 
 ### إعداد عميل PSR-18 HTTP يدويًا
 
@@ -468,7 +490,8 @@ try {
 ```
 erikwang2013/etcd/
 ├── composer.json                    # تعريف الحزمة: تحميل تلقائي PSR-4 + اكتشاف تلقائي لـ Laravel / Hyperf
-├── phpunit.xml                      # إعداد PHPUnit (مجموعتا unit / integration)
+├── phpunit.xml.dist                 # إعداد PHPUnit (مجموعتا unit / integration)
+├── .github/workflows/ci.yml         # بوابة قبل الدمج: مصفوفة unit / حدّ الصياغة / التكامل / توثيق i18n
 ├── config/etcd.php                  # الإعداد الافتراضي، يُنشر لكل إطار (يقرأ متغيرات ETCD_*)
 ├── .github/workflows/release.yml    # نشر تلقائي عند إنشاء tag
 ├── scripts/i18n/                    #   أدوات التوثيق: الكتالوجات، بناء المخططات، فحص الترجمات
@@ -498,10 +521,7 @@ erikwang2013/etcd/
 │   ├── Cluster/ClusterClient.php    # إدارة أعضاء العنقود Cluster
 │   ├── Maintenance/                 # صيانة Maintenance: status / alarm / defrag / snapshot
 │   ├── Exception/                   # تدرّج الاستثناءات
-│   ├── Protobuf/                    # رسائل Protobuf (أصناف PHP صرفة لا ترث Message)
-│   │   ├── Mvccpb/                  #   KeyValue / Event
-│   │   ├── Etcdserverpb/            #   60+ رسالة طلب / استجابة
-│   │   └── Authpb/                  #   User / Role / Permission
+│   ├── Support/KeyValue.php         # فك ترميز مشترك: قراءة KV وأحداث watch تعيد الشكل نفسه
 │   └── Adapter/                     # محوّلات الأطر
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider

@@ -49,17 +49,28 @@ class HttpTransportTest extends TestCase
         self::assertSame(json_encode($body, JSON_UNESCAPED_SLASHES), $sentBody);
     }
 
-    public function testSendAddsAuthorizationHeaderWhenHttpsAuth(): void
+    // etcd v3 does not accept HTTP Basic: it wants a token from
+    // /v3/auth/authenticate, sent bare (no "Bearer"). Basic was only ever
+    // accepted up to 3.4, so the old assertion here described a broken client.
+    public function testSendExchangesCredentialsForATokenAndSendsItBare(): void
     {
         $mocks = new PsrHttpMocks();
-        $mocks->queue(200, '{"header":{}}');
+        $mocks->queue(200, '{"token":"tok-123"}');   // /v3/auth/authenticate
+        $mocks->queue(200, '{"header":{}}');         // the request itself
         $transport = $this->transport(['scheme' => 'https', 'auth' => ['user' => 'u', 'password' => 'p']]);
         $transport->setHttpClient($mocks->client(), $mocks->requestFactory(), $mocks->streamFactory());
 
         $transport->send('/v3/kv/put', ['key' => 'x']);
 
         [, , $headers] = $mocks->lastRequest();
-        self::assertSame('Basic ' . base64_encode('u:p'), $headers['Authorization']);
+        self::assertSame('tok-123', $headers['Authorization']);
+        self::assertStringNotContainsString('Basic', $headers['Authorization']);
+
+        // and the token is cached, not re-fetched per request
+        $mocks->queue(200, '{"header":{}}');
+        $transport->send('/v3/kv/put', ['key' => 'y']);
+        [, , $headers] = $mocks->lastRequest();
+        self::assertSame('tok-123', $headers['Authorization']);
     }
 
     public function testSendDecodesJsonResponse(): void
@@ -119,7 +130,8 @@ class HttpTransportTest extends TestCase
             self::fail('Expected ConnectionException');
         } catch (ConnectionException $e) {
             self::assertInstanceOf(\RuntimeException::class, $e->getPrevious());
-            self::assertStringContainsString('Failed to connect to etcd', $e->getMessage());
+            self::assertStringContainsString('HTTP client failure', $e->getMessage());
+            self::assertStringContainsString('boom', $e->getMessage());
         }
     }
 

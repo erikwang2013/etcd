@@ -103,7 +103,7 @@ $etcd = new EtcdClient([
     'scheme'    => 'http',  // http(기본) | https
     'timeout'   => 5.0,     // 초
     'retry'     => 3,       // 연결 실패 재시도 횟수
-    'auth'      => [        // 선택, Basic Auth
+    'auth'      => [        // 선택; 자격 증명을 token으로 교환하려면 https 필요
         'user'     => 'root',
         'password' => 'secret',
     ],
@@ -157,6 +157,10 @@ $etcd->kv()->get('/start', [
     'serializable'=> true,            // Raft 합의 생략 (더 빠르지만 오래된 값일 수 있음)
     'keysOnly'    => true,            // key만 반환, value 제외
     'countOnly'   => false,           // 개수만 반환
+    'minModRevision'    => 100,       // 이 리비전 이후에 수정된 key만
+    'maxModRevision'    => 200,
+    'minCreateRevision' => 100,       // 생성 리비전으로 필터
+    'maxCreateRevision' => 200,
 ]);
 
 // 삭제
@@ -175,6 +179,20 @@ $etcd->kv()->txn(
     failure: [
         ['request_put' => ['key' => '/counter', 'value' => '1']]
     ]
+);
+
+// 중첩 트랜잭션: 브랜치 안에 트랜잭션을 또 넣을 수 있음
+$etcd->kv()->txn(
+    compare: [['result' => 0, 'target' => 3, 'key' => '/lock', 'value' => 'free']],
+    success: [[
+        'request_put' => ['key' => '/lock', 'value' => 'mine'],
+        'request_txn' => [                       // 내부 트랜잭션
+            'compare' => [['result' => 0, 'target' => 1, 'key' => '/lock', 'create_revision' => 0]],
+            'success' => [['request_put' => ['key' => '/log', 'value' => 'acquired']]],
+            'failure' => [],
+        ],
+    ]],
+    failure: []
 );
 
 // 이력 압축 (저장 공간 회수)
@@ -203,7 +221,9 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
-**끊김 후 재연결:** Watch 연결이 끊기면 마지막으로 받은 revision부터 자동으로 다시 구독하므로 이벤트를 잃지 않습니다.
+**끊김 후 재연결:** Watch 연결이 끊기면 `lastRevision + 1`부터 다시 구독합니다(`start_revision`은 **폐구간**이라 같은 값을 쓰면 마지막 이벤트가 재생됩니다). 장애 조치에서 이벤트를 잃지도, 중복 전달하지도 않습니다.
+
+**재시도 정책:** **연결이 아예 맺어지지 않은** 경우(연결 거부 / DNS 실패)에만 재시도하며, 읽기 전용 RPC(range, status, memberlist 등)는 5xx와 타임아웃까지 추가로 허용합니다. 쓰기 작업이 5xx나 읽기 타임아웃을 만나면 **재시도하지 않습니다** — 이미 반영되었을 수 있고, 재생하면 CAS 같은 요청이 두 번 적용되거나 "자신 있게 틀린 답"(재시도가 자신의 첫 쓰기 결과를 보고 실제로는 이겼는데 CAS 실패로 보고)을 받게 됩니다.
 
 ### Lease — 리스
 
@@ -260,7 +280,13 @@ $auth->disable();          // 인증 끄기
 $status = $auth->status(); // ['enabled' => true, 'authRevision' => 5]
 ```
 
-**주의:** 인증을 켜면 클라이언트에 `auth.user`와 `auth.password`를 설정해야 계속 조작할 수 있습니다.
+**인증은 어떻게 이루어지나:** etcd v3는 HTTP Basic을 받지 않습니다 — 먼저 자격 증명을 token으로 교환해야 하고(`POST /v3/auth/authenticate`), 그다음 token을 `Authorization: <token>` 형태로 그대로 보냅니다(`Bearer` 접두사를 붙여도 거부됩니다). `auth.user` / `auth.password`를 설정하면 클라이언트가 **자동으로** 이 과정을 수행하고 token을 캐시하며, 401이면 한 번 다시 인증합니다. 직접 호출할 필요가 없습니다. 직접 교환할 수도 있습니다:
+
+```php
+$token = $etcd->auth()->authenticate('root', 'secret');  // 발급받은 token은 이후 요청에서 재사용됨
+```
+
+자격 증명을 보내려면 `scheme => 'https'`가 필요합니다: 평문 http에서는 생성자가 바로 거부합니다(비밀번호가 평문으로 노출되지 않도록).
 
 ### Cluster — 클러스터 관리
 
@@ -310,13 +336,9 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 |------|------|--------|-------------|
 | **HTTP** | 사용 가능 | ext-curl / stream / PSR-18 중 하나 | 확장 의존성 없이 바로 사용 |
 | **gRPC** | 골격 | ext-grpc + grpc/grpc + google/protobuf | 고성능, 네이티브 스트리밍 |
-| **auto** | 기본 | 자동 감지 | gRPC가 있으면 gRPC, 없으면 HTTP |
+| **auto** | 기본 | — | 현재 `http`와 동일 (아래 참조) |
 
-`auto` 모드 감지 로직:
-1. `extension_loaded('grpc')` — C 확장이 로드되었는가?
-2. `class_exists('Grpc\BaseStub')` — `grpc/grpc` composer 패키지가 설치되었는가?
-
-둘 다 만족해야 gRPC로 가고, 그렇지 않으면 HTTP로 폴백합니다.
+`auto`는 `http`와 같습니다: `GrpcTransport`는 아직 골격이라(세 메서드 모두 예외를 던짐) **자동으로** gRPC로 전환하지 **않습니다** — 실제로 `ext-grpc`를 탐지하면 확장을 설치한 사용자만 오히려 쓸 수 없게 됩니다. `'transport' => 'grpc'`를 명시적으로 넘겨야 선택됩니다. gRPC가 구현되면 이 의미도 바뀝니다.
 
 ### PSR-18 HTTP 클라이언트 수동 설정
 
@@ -468,7 +490,8 @@ try {
 ```
 erikwang2013/etcd/
 ├── composer.json                    # 패키지 정의: PSR-4 오토로드 + Laravel / Hyperf 자동 검색
-├── phpunit.xml                      # PHPUnit 설정 (unit / integration 두 스위트)
+├── phpunit.xml.dist                 # PHPUnit 설정 (unit / integration 두 스위트)
+├── .github/workflows/ci.yml         # 병합 전 게이트: 단위 테스트 매트릭스 / 문법 기준선 / 통합 / i18n 문서
 ├── config/etcd.php                  # 기본 설정, 각 프레임워크 게시용 (ETCD_* 환경 변수 읽기)
 ├── .github/workflows/release.yml    # 태그 푸시 시 자동 릴리스
 ├── scripts/i18n/                    #   문서 도구: 카탈로그, 다이어그램 빌더, 번역 검사
@@ -498,10 +521,7 @@ erikwang2013/etcd/
 │   ├── Cluster/ClusterClient.php    # Cluster 클러스터 멤버 관리
 │   ├── Maintenance/                 # Maintenance 운영: status / alarm / defrag / snapshot
 │   ├── Exception/                   # 예외 계층
-│   ├── Protobuf/                    # 메시지 스텁 (순수 PHP 데이터 클래스, Message 미상속)
-│   │   ├── Mvccpb/                  #   KeyValue, Event
-│   │   ├── Etcdserverpb/            #   60+ 요청 / 응답 메시지
-│   │   └── Authpb/                  #   User, Role, Permission
+│   ├── Support/KeyValue.php         # 공용 디코딩: KV 조회와 watch 이벤트가 같은 모양을 반환
 │   └── Adapter/                     # 프레임워크 어댑터
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider

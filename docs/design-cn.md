@@ -8,7 +8,7 @@
 
 - **双模传输**：gRPC 原生协议（高性能、完整流式支持）与 HTTP JSON 网关（零扩展依赖、开箱即用）自动切换
 - **全功能覆盖**：KV 存储、Watch 监听、Lease 租约、Auth 认证授权、Cluster 集群管理、Maintenance 运维操作
-- **框架无关核心**：核心客户端仅依赖 PSR-18 + PSR-17 接口，不绑定任何框架
+- **框架无关核心**：不绑定任何框架；HTTP 通道按 ext-curl → PHP 流封装 → PSR-18 自动降级，PSR 接口本身是可选的
 - **框架适配层**：为每个目标框架提供符合其插件规范的适配器（ServiceProvider / Facade / ConfigProvider 等）
 - **PHP 8.1+**：利用严格类型、枚举、纤程等现代 PHP 特性
 
@@ -40,16 +40,16 @@
 | **门面层** | 统一入口，组合 6 个子系统 | `EtcdClient` |
 | **子系统层** | 各 API 领域的业务逻辑、编解码 | `KvClient`, `WatchClient`, `LeaseClient` 等 |
 | **传输层** | 网络通信，gRPC/HTTP 抽象 | `TransportInterface`, `HttpTransport`, `GrpcTransport` |
-| **消息层** | protobuf 消息桩（纯 PHP 数据类） | `src/Protobuf/` 下 60+ 类 |
+| **支撑层** | 线格式解码（base64 / int64 字符串 / 零值省略） | `Support/KeyValue.php` |
 | **异常层** | 类型化错误处理 | `EtcdException` → `ConnectionException`, `AuthException`, `KeyNotFoundException` |
 
 ### 设计决策
 
-**为什么 protobuf 桩是纯 PHP 类？**  
-当前环境的 protobuf C 扩展（v4.31.1）与 `google/protobuf` composer 包的运行时版本存在不兼容（实例化 Message 子类时 SIGSEGV）。为了让 HTTP 传输立刻可用，桩代码被设计为不继承 `Google\Protobuf\Internal\Message` 的纯 PHP 数据类。将来实现 gRPC 传输时，会提供独立编译的正式 protobuf 桩。
+**为什么删掉了手写的 protobuf 桩？**  
+原先 `src/Protobuf/` 有 85 个手写消息类（约 1555 行）。它们**没有任何引用**、**不含任何序列化实现**，而且类型是错的：64 位字段用 `int`（网关发的是 JSON 字符串，uint64 还放不进 PHP 的 int）、枚举用 `int`（网关发的是名字如 `"DELETE"`/`"NOSPACE"`）、多个 repeated 字段连 setter 都没有。留着比删掉更危险——实现 gRPC 时会被当成地基。实现 gRPC 应从 etcd 的 `rpc.proto` 生成正式桩。
 
-**为什么默认传输是 `auto` 而非 `http`？**  
-设计目标是与 gRPC 扩展共存的自动检测。`auto` 模式检查两个条件：`extension_loaded('grpc')` AND `class_exists('Grpc\BaseStub')`。后者确保 `grpc/grpc` composer 包已安装（不仅是 C 扩展），避免选中骨架实现。
+**`auto` 为什么现在等同于 `http`？**  
+`GrpcTransport` 三个方法都还抛异常，所以自动探测 `ext-grpc` 只会让"装了扩展"的用户直接不可用。当前实现下 `auto` 与 `http` 完全等价，只有显式 `transport = grpc` 才会选中 gRPC。等 gRPC 真正实现后再恢复探测语义。
 
 ## 六大系统
 
@@ -176,8 +176,10 @@ interface TransportInterface {
 - **通信协议：** 通过 etcd 内置的 gRPC-gateway 发送 JSON HTTP 请求
 - **端点路径：** `/v3/kv/put`, `/v3/kv/range`, `/v3/watch` 等
 - **HTTP 通道（自动降级）：** ext-curl → PHP 流封装（`file_get_contents` + `stream_context`）→ PSR-18 `ClientInterface` + PSR-17 工厂。
-  三者都不可用时抛 `ConnectionException` 并说明启用方式；`config['driver']` 可强制指定 `curl` / `stream`。
-  传输层失败标记为 `retryable`（重试），配置类错误（如强制了未加载的驱动）不重试。
+  三者都不可用时抛 `ConnectionException` 并说明启用方式；`config['driver']` 可强制指定 `curl` / `stream`（`options.ssl` 对 curl 与流封装都生效，PSR-18 路径的 TLS 由调用方的客户端负责）。
+- **Watch：** cURL 写回调（默认驱动）或阻塞读 + 短超时（流驱动）。**不能用 `stream_select`**：真实 etcd 的 `/v3/watch` 是 chunked 响应，PHP 的 http 封装会挂 dechunk 过滤器，带过滤器的流无法转成可 select 的 fd，PHP 8 直接抛 `ValueError`。
+- **认证：** etcd v3 只认 `/v3/auth/authenticate` 换来的 token（裸 `Authorization: <token>`，不接受 Basic，也不接受 `Bearer` 前缀）。配置 `auth` 后自动换取并缓存，401 时重认证一次。
+- **重试：** 只在"请求根本没到达服务端"（拒绝连接 / DNS 失败）时重试；只读接口额外容忍 5xx 与超时。写操作遇 5xx/超时不重试——重放会让 CAS 被应用两次并返回错误的分支结果。
 - **认证：** HTTP Basic Auth 头（`Authorization: Basic <base64>`）
 - **重试：** 连接级失败自动重试（默认 2 次，间隔 100ms），认证和服务器错误不重试
 - **Watch：** `fopen()` + `stream_context_create` 分块读取，非阻塞 I/O，断线自动重连
@@ -298,10 +300,7 @@ erikwang2013/etcd/
 │   │   └── RoleClient.php             #   角色 CRUD + 权限
 │   ├── Cluster/ClusterClient.php      # 集群成员管理
 │   ├── Maintenance/MaintenanceClient.php  # 运维操作
-│   ├── Protobuf/                      # 消息桩（纯 PHP 类）
-│   │   ├── Mvccpb/                    #   KeyValue, Event
-│   │   ├── Etcdserverpb/              #   60+ 请求/响应消息
-│   │   └── Authpb/                    #   Permission, User, Role
+│   ├── Support/KeyValue.php           # 共用解码（KV 读取与 watch 事件同一形状）
 │   ├── Exception/                     # 异常层次
 │   └── Adapter/                       # 框架适配器
 │       ├── Laravel/
@@ -312,7 +311,7 @@ erikwang2013/etcd/
 
 ## 待办路线图
 
-- [ ] gRPC 传输完整实现（需编译 protobuf 服务桩）
+- [ ] gRPC 传输完整实现（需从 `rpc.proto` 生成正式消息桩，手写桩已删除）
 - [ ] TLS/SSL 双向认证支持
 - [ ] 选举（Election）和并发控制 API
 - [ ] 单元测试 + 集成测试（Docker etcd 容器）

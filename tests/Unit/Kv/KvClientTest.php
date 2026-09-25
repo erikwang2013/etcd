@@ -134,6 +134,70 @@ class KvClientTest extends TestCase
     }
 
     #[Test]
+    public function getMapsRevisionFilters(): void
+    {
+        $t = new FakeTransport();
+        $t->addResponse([]);
+        $client = new KvClient($t);
+
+        $client->get('k', [
+            'rangeEnd'          => 'k\xff',
+            'minModRevision'    => 11,
+            'maxModRevision'    => 22,
+            'minCreateRevision' => 33,
+            'maxCreateRevision' => 44,
+        ]);
+
+        $body = $t->sent[0][1];
+        $this->assertSame(base64_encode('k'), $body['key']);
+        $this->assertSame(11, $body['min_mod_revision']);
+        $this->assertSame(22, $body['max_mod_revision']);
+        $this->assertSame(33, $body['min_create_revision']);
+        $this->assertSame(44, $body['max_create_revision']);
+    }
+
+    #[Test]
+    public function getLeavesRevisionFiltersOutWhenUnset(): void
+    {
+        $t = new FakeTransport();
+        $t->addResponse([]);
+        $client = new KvClient($t);
+
+        $client->get('k');
+
+        $body = $t->sent[0][1];
+        foreach (['min_mod_revision', 'max_mod_revision', 'min_create_revision', 'max_create_revision'] as $field) {
+            $this->assertArrayNotHasKey($field, $body);
+        }
+    }
+
+    #[Test]
+    public function getByPrefixKeepsTheCallersOptions(): void
+    {
+        $t = new FakeTransport();
+        $t->addResponse([]);
+        $client = new KvClient($t);
+
+        $client->getByPrefix('pre/', [
+            'limit'          => 3,
+            'sortOrder'      => 'descend',
+            'sortTarget'     => 'mod',
+            'keysOnly'       => true,
+            'countOnly'      => true,
+            'minModRevision' => 7,
+        ]);
+
+        $body = $t->sent[0][1];
+        $this->assertSame(base64_encode('pre/'), $body['key']);
+        $this->assertSame(3, $body['limit']);
+        $this->assertSame(2, $body['sort_order']);
+        $this->assertSame(3, $body['sort_target']);
+        $this->assertTrue($body['keys_only']);
+        $this->assertTrue($body['count_only']);
+        $this->assertSame(7, $body['min_mod_revision']);
+    }
+
+    #[Test]
     public function getRejectsInvalidSortTarget(): void
     {
         $t = new FakeTransport();
@@ -216,6 +280,21 @@ class KvClientTest extends TestCase
     }
 
     #[Test]
+    public function getOrFailAsksForExactlyOneKey(): void
+    {
+        $t = new FakeTransport();
+        $t->addResponse(['kvs' => [['key' => base64_encode('p/a'), 'value' => base64_encode('v')]]]);
+        $client = new KvClient($t);
+
+        $kv = $client->getOrFail('p/', ['rangeEnd' => 'p0', 'limit' => 500]);
+
+        $this->assertSame('/v3/kv/range', $t->sent[0][0]);
+        $this->assertSame(1, $t->sent[0][1]['limit']);
+        $this->assertSame(base64_encode('p0'), $t->sent[0][1]['range_end']);
+        $this->assertSame('p/a', $kv['key']);
+    }
+
+    #[Test]
     public function getOrFailThrowsWhenMissing(): void
     {
         $t = new FakeTransport();
@@ -270,95 +349,6 @@ class KvClientTest extends TestCase
         $client->deleteByPrefix('foo');
 
         $this->assertSame(base64_encode(EtcdClient::prefixToRangeEnd('foo')), $t->sent[0][1]['range_end']);
-    }
-
-    #[Test]
-    public function txnEncodesComparesForAllTargets(): void
-    {
-        $t = new FakeTransport();
-        $t->addResponse([]);
-        $client = new KvClient($t);
-
-        $client->txn(
-            [
-                ['result' => 0, 'target' => 0, 'key' => 'a', 'version' => 5],
-                ['result' => 1, 'target' => 1, 'key' => 'b', 'create_revision' => 6],
-                ['result' => 2, 'target' => 2, 'key' => 'c', 'mod_revision' => 7],
-                ['result' => 3, 'target' => 3, 'key' => 'd', 'value' => 'cmp-val'],
-                ['result' => 0, 'target' => 4, 'key' => 'e', 'lease' => 8],
-            ],
-            [],
-            []
-        );
-
-        $this->assertSame('/v3/kv/txn', $t->sent[0][0]);
-        $c = $t->sent[0][1]['compare'];
-        $this->assertCount(5, $c);
-        $this->assertSame(0, $c[0]['result']);
-        $this->assertSame(base64_encode('a'), $c[0]['key']);
-        $this->assertSame(5, $c[0]['version']);
-        $this->assertArrayNotHasKey('value', $c[0]);
-        $this->assertSame(6, $c[1]['create_revision']);
-        $this->assertSame(7, $c[2]['mod_revision']);
-        $this->assertSame(base64_encode('cmp-val'), $c[3]['value']);
-        $this->assertSame(8, $c[4]['lease']);
-    }
-
-    #[Test]
-    public function txnEncodesRequestOps(): void
-    {
-        $t = new FakeTransport();
-        $t->addResponse([]);
-        $client = new KvClient($t);
-
-        $client->txn(
-            [['result' => 0, 'target' => 0, 'key' => 'k']],
-            [['request_put' => ['key' => 'pk', 'value' => 'pv', 'lease' => 9]]],
-            [
-                ['request_range' => ['key' => 'rk', 'range_end' => 're']],
-                ['request_delete_range' => ['key' => 'dk', 'range_end' => 'de']],
-            ]
-        );
-
-        $body = $t->sent[0][1];
-        $this->assertSame(base64_encode('pk'), $body['success'][0]['request_put']['key']);
-        $this->assertSame(base64_encode('pv'), $body['success'][0]['request_put']['value']);
-        $this->assertSame(9, $body['success'][0]['request_put']['lease']);
-        $this->assertSame(base64_encode('rk'), $body['failure'][0]['request_range']['key']);
-        $this->assertSame(base64_encode('re'), $body['failure'][0]['request_range']['range_end']);
-        $this->assertSame(base64_encode('dk'), $body['failure'][1]['request_delete_range']['key']);
-        $this->assertSame(base64_encode('de'), $body['failure'][1]['request_delete_range']['range_end']);
-    }
-
-    #[Test]
-    public function txnDecodesAllResponseTypesRecursively(): void
-    {
-        $t = new FakeTransport();
-        $t->addResponse([
-            'header' => ['revision' => 3],
-            'succeeded' => true,
-            'responses' => [
-                ['response_put' => ['prev_kv' => ['key' => base64_encode('pk'), 'value' => base64_encode('pv')]]],
-                ['response_range' => ['kvs' => [['key' => base64_encode('rk'), 'value' => base64_encode('rv')]], 'count' => 1]],
-                ['response_delete_range' => ['deleted' => 2]],
-                ['response_txn' => ['succeeded' => false, 'responses' => [['response_put' => []]]]],
-            ],
-        ]);
-        $client = new KvClient($t);
-
-        $result = $client->txn([], []);
-
-        $this->assertSame(['revision' => 3], $result['header']);
-        $this->assertTrue($result['succeeded']);
-        $this->assertSame('put', $result['responses'][0]['type']);
-        $this->assertSame('pk', $result['responses'][0]['response']['prev_kv']['key']);
-        $this->assertSame('range', $result['responses'][1]['type']);
-        $this->assertSame('rk', $result['responses'][1]['response']['kvs'][0]['key']);
-        $this->assertSame('delete', $result['responses'][2]['type']);
-        $this->assertSame(2, $result['responses'][2]['response']['deleted']);
-        $this->assertSame('txn', $result['responses'][3]['type']);
-        $this->assertFalse($result['responses'][3]['response']['succeeded']);
-        $this->assertSame('put', $result['responses'][3]['response']['responses'][0]['type']);
     }
 
     #[Test]

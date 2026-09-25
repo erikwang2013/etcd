@@ -29,6 +29,70 @@ class LeaseClientTest extends TestCase
     }
 
     #[Test]
+    public function grantRejectsATtlBelowOneSecond(): void
+    {
+        $t = new FakeTransport();
+        $client = new LeaseClient($t);
+
+        foreach ([0, -1] as $ttl) {
+            try {
+                $client->grant($ttl);
+                $this->fail("grant({$ttl}) should be refused");
+            } catch (EtcdException $e) {
+                $this->assertStringContainsString('at least 1 second', $e->getMessage());
+            }
+        }
+
+        // etcd accepts TTL 0 and answers TTL "2" for a lease that is already gone,
+        // so the request must not be sent at all.
+        $this->assertSame([], $t->sent);
+    }
+
+    #[Test]
+    public function grantKeepsALeaseIdThatDoesNotFitInAnIntAsAString(): void
+    {
+        $t = new FakeTransport();
+        $t->addResponse(['ID' => '10276657743932975437', 'TTL' => '60']);
+        $client = new LeaseClient($t);
+
+        $result = $client->grant(60);
+
+        $this->assertSame('10276657743932975437', $result['ID']);
+        $this->assertSame(60, $result['TTL']);
+    }
+
+    #[Test]
+    public function writeCallsAcceptAStringLeaseIdUnchanged(): void
+    {
+        $t = new FakeTransport();
+        $t->addResponse(['ID' => '10276657743932975437', 'TTL' => '60']);   // grant
+        $t->addResponse(['ID' => '10276657743932975437', 'TTL' => '30']);   // keepAlive
+        $t->addResponse([]);                                                // revoke
+        $client = new LeaseClient($t);
+
+        // the id grant()/list() handed out goes straight back in, whatever its form
+        $id = $client->grant(60)['ID'];
+        $client->keepAlive($id);
+        $client->revoke($id);
+
+        $this->assertSame(['ID' => '10276657743932975437'], $t->sent[1][1]);
+        $this->assertSame(['ID' => '10276657743932975437'], $t->sent[2][1]);
+    }
+
+    #[Test]
+    public function listKeepsLeaseIdsThatDoNotFitInAnIntAsStrings(): void
+    {
+        $t = new FakeTransport();
+        $t->addResponse(['leases' => [['ID' => '10276657743932975437'], ['ID' => '11']]]);
+        $client = new LeaseClient($t);
+
+        $this->assertSame(
+            [['ID' => '10276657743932975437'], ['ID' => 11]],
+            $client->list()['leases']
+        );
+    }
+
+    #[Test]
     public function grantSendsIdWhenPositive(): void
     {
         $t = new FakeTransport();

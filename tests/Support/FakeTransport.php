@@ -11,6 +11,8 @@ class FakeTransport implements TransportInterface
 {
     /** @var list<array{0: string, 1: array}> */
     public array $sent = [];
+    /** Per-call timeouts, parallel to $sent (kept out of it so tuple assertions stay valid). */
+    public array $timeouts = [];
 
     /** @var list<array> */
     public array $responses = [];
@@ -35,18 +37,20 @@ class FakeTransport implements TransportInterface
         return $this;
     }
 
-    public function send(string $path, array $body): array
+    public function send(string $path, array $body, ?float $timeout = null): array
     {
         $this->sent[] = [$path, $body];
+        $this->timeouts[] = $timeout;
         if ($this->sendException !== null) {
             throw $this->sendException;
         }
         return array_shift($this->responses) ?? [];
     }
 
-    public function sendRaw(string $path): string
+    public function sendRaw(string $path, ?float $timeout = null): string
     {
         $this->sent[] = [$path, []];
+        $this->timeouts[] = $timeout;
         if ($this->rawException !== null) {
             throw $this->rawException;
         }

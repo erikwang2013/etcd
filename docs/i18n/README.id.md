@@ -67,29 +67,29 @@ use Erikwang2013\Etcd\EtcdClient;
 
 $etcd = new EtcdClient(['endpoints' => ['127.0.0.1:2379']]);
 
-// 写入
+// tulis
 $etcd->kv()->put('/app/config', '{"debug":true}');
 
-// 读取
+// baca
 $result = $etcd->kv()->get('/app/config');
 print_r($result['kvs'][0]);  // ['key' => '/app/config', 'value' => '{"debug":true}', ...]
 
-// 找不到时抛异常
+// melempar exception bila tidak ditemukan
 $kv = $etcd->kv()->getOrFail('/app/config');
 
-// 前缀扫描
+// pemindaian prefix
 $all = $etcd->kv()->getByPrefix('/app/');
 echo "total {$all['count']} key\n";
 
-// 删除
+// hapus
 $etcd->kv()->delete('/app/config');
 $etcd->kv()->deleteByPrefix('/cache/');
 
-// 带租约写入（60 秒后自动删除）
+// tulis dengan lease (terhapus otomatis setelah 60 detik)
 $lease = $etcd->lease()->grant(60);
 $etcd->kv()->put('/session/123', 'active', ['lease' => $lease['ID']]);
 
-// 续约
+// perpanjang lease
 $etcd->lease()->keepAlive($lease['ID']);
 ```
 
@@ -97,13 +97,13 @@ $etcd->lease()->keepAlive($lease['ID']);
 
 ```php
 $etcd = new EtcdClient([
-    'endpoints' => ['192.168.1.10:2379', '192.168.1.11:2379'],  // 多节点
-    'transport' => 'auto',  // auto（默认）| http | grpc
+    'endpoints' => ['192.168.1.10:2379', '192.168.1.11:2379'],  // beberapa node
+    'transport' => 'auto',  // auto (default) | http | grpc
     'driver'    => 'auto',  // auto (default) | curl | stream
-    'scheme'    => 'http',  // http（默认）| https
+    'scheme'    => 'http',  // http (default) | https
     'timeout'   => 5.0,     // detik
-    'retry'     => 3,       // 连接失败重试次数
-    'auth'      => [        // 可选，Basic Auth
+    'retry'     => 3,       // jumlah percobaan ulang saat koneksi gagal
+    'auth'      => [        // opsional; menukar kredensial dengan token butuh https
         'user'     => 'root',
         'password' => 'secret',
     ],
@@ -130,41 +130,45 @@ Tanpa konfigurasi eksplisit, variabel berikut dibaca otomatis:
 ### KV — Operasi Key/Value
 
 ```php
-// 写入
+// tulis
 $etcd->kv()->put('key', 'value', [
-    'lease'       => 12345,    // 绑定租约 ID
-    'prevKv'      => true,     // 返回写入前的旧值
+    'lease'       => 12345,    // ID lease yang diikat
+    'prevKv'      => true,     // kembalikan value lama sebelum ditulis
     'ignoreValue' => false,
     'ignoreLease' => false,
 ]);
 
-// 读取单键
+// baca satu key
 $etcd->kv()->get('/exact/key');
 
-// 找不到即抛异常
+// melempar exception bila tidak ditemukan
 $kv = $etcd->kv()->getOrFail('/exact/key');
 
-// 前缀扫描
+// pemindaian prefix
 $etcd->kv()->getByPrefix('/prefix/');
 
-// 范围查询（完整参数）
+// kueri rentang (parameter lengkap)
 $etcd->kv()->get('/start', [
-    'rangeEnd'    => '/startz',      // 范围结束 key
-    'limit'       => 100,             // 最大返回条数
-    'revision'    => 42,              // 快照版本号
+    'rangeEnd'    => '/startz',      // key akhir rentang
+    'limit'       => 100,             // jumlah maksimum yang dikembalikan
+    'revision'    => 42,              // nomor revisi snapshot
     'sortOrder'   => 'ascend',        // none | ascend | descend
     'sortTarget'  => 'key',           // key | version | create | mod | value
-    'serializable'=> true,            // 跳过 Raft 共识（更快，可能过期）
-    'keysOnly'    => true,            // 只返回 key，不返回 value
-    'countOnly'   => false,           // 只返回计数
+    'serializable'=> true,            // lewati konsensus Raft (lebih cepat, bisa kedaluwarsa)
+    'keysOnly'    => true,            // hanya kembalikan key, bukan value
+    'countOnly'   => false,           // hanya kembalikan jumlah
+    'minModRevision'    => 100,       // hanya key dengan revisi perubahan >= 100
+    'maxModRevision'    => 200,
+    'minCreateRevision' => 100,       // filter berdasarkan revisi pembuatan
+    'maxCreateRevision' => 200,
 ]);
 
-// 删除
+// hapus
 $etcd->kv()->delete('/key');
 $etcd->kv()->deleteByPrefix('/prefix/');
-$etcd->kv()->delete('/key', ['prevKv' => true]);  // 同时返回被删的值
+$etcd->kv()->delete('/key', ['prevKv' => true]);  // sekaligus kembalikan value yang dihapus
 
-// 事务（原子 CAS）
+// transaksi (CAS atomik)
 $etcd->kv()->txn(
     compare: [
         ['result' => 0, 'target' => 3, 'key' => '/counter', 'value' => '100']
@@ -177,7 +181,21 @@ $etcd->kv()->txn(
     ]
 );
 
-// 压缩历史版本（释放存储空间）
+// transaksi bersarang: cabang bisa memuat transaksi lagi
+$etcd->kv()->txn(
+    compare: [['result' => 0, 'target' => 3, 'key' => '/lock', 'value' => 'free']],
+    success: [[
+        'request_put' => ['key' => '/lock', 'value' => 'mine'],
+        'request_txn' => [                       // transaksi dalam
+            'compare' => [['result' => 0, 'target' => 1, 'key' => '/lock', 'create_revision' => 0]],
+            'success' => [['request_put' => ['key' => '/log', 'value' => 'acquired']]],
+            'failure' => [],
+        ],
+    ]],
+    failure: []
+);
+
+// padatkan versi historis (membebaskan ruang penyimpanan)
 $etcd->kv()->compact(1000);
 ```
 
@@ -187,7 +205,7 @@ $etcd->kv()->compact(1000);
 ### Watch — Pemantauan Perubahan
 
 ```php
-// 监听单个 key（阻塞模式，建议在协程/独立进程中运行）
+// pantau satu key (mode blocking, sebaiknya dijalankan di coroutine/proses terpisah)
 $etcd->watch()->watch('/config/key', function (array $events) {
     foreach ($events as $event) {
         // $event: ['type' => 'PUT'|'DELETE', 'kv' => [...], 'prev_kv' => [...]|null]
@@ -195,35 +213,37 @@ $etcd->watch()->watch('/config/key', function (array $events) {
     }
 });
 
-// 监听前缀下所有 key 的变更
+// pantau semua perubahan key di bawah prefix
 $etcd->watch()->watchPrefix('/config/', $callback, [
-    'startRevision' => 100,       // 从指定版本开始
-    'prevKv'        => true,      // DELETE 事件返回原值
-    'progressNotify'=> true,      // 定期发送空事件（心跳）
+    'startRevision' => 100,       // mulai dari revisi tertentu
+    'prevKv'        => true,      // event DELETE mengembalikan value asli
+    'progressNotify'=> true,      // kirim event kosong berkala (heartbeat)
 ]);
 ```
 
-**Reconnect:** saat koneksi Watch terputus, klien otomatis berlangganan ulang dari revision terakhir yang diterima, jadi tidak ada event yang hilang.
+**Reconnect:** saat koneksi Watch terputus, klien berlangganan ulang dari `lastRevision + 1` (`start_revision` bersifat **inklusif**, melanjutkan dengan nilai lama akan memutar ulang event terakhir). Failover tidak kehilangan event dan tidak mengirimnya dua kali.
+
+**Kebijakan retry:** hanya kegagalan yang membuktikan koneksi tidak pernah terbentuk (koneksi ditolak / DNS gagal) yang dicoba ulang, dan RPC baca-saja (range, status, memberlist, dll.) juga mentoleransi 5xx dan timeout. Operasi tulis yang terkena 5xx atau timeout baca **tidak** dicoba ulang — permintaan itu bisa jadi sudah berlaku, dan mengulangnya menerapkan CAS dua kali, atau bahkan memberi "jawaban yang salah dengan yakin" (retry melihat tulisannya sendiri yang pertama lalu melaporkan CAS gagal padahal sebenarnya menang).
 
 ### Lease — Sewa
 
 ```php
-// 创建租约
-$lease = $etcd->lease()->grant(300);             // 300 秒 TTL
-$lease = $etcd->lease()->grant(300, 99999);      // 指定租约 ID
+// buat lease
+$lease = $etcd->lease()->grant(300);             // TTL 300 detik
+$lease = $etcd->lease()->grant(300, 99999);      // tentukan ID lease
 
-// 续约（单次）
+// perpanjang lease (sekali)
 $result = $etcd->lease()->keepAlive($lease['ID']);
 echo "TTL tersisa: {$result['TTL']} detik";
 
-// 查看租约状态
+// lihat status lease
 $info = $etcd->lease()->timeToLive($lease['ID']);
-$info = $etcd->lease()->timeToLive($lease['ID'], true);  // 含绑定的 key 列表
+$info = $etcd->lease()->timeToLive($lease['ID'], true);  // termasuk daftar key yang terikat
 
-// 列出所有活跃租约
+// daftar semua lease aktif
 $leases = $etcd->lease()->list();
 
-// 撤销租约（绑定的所有 key 立即删除）
+// cabut lease (semua key yang terikat langsung dihapus)
 $etcd->lease()->revoke($lease['ID']);
 ```
 
@@ -234,72 +254,78 @@ $etcd->lease()->revoke($lease['ID']);
 ```php
 $auth = $etcd->auth();
 
-// === 用户管理 ===
-$auth->user()->add('alice', 'password123');          // 创建用户
-$auth->user()->get('alice');                         // 查看用户及其角色
-$auth->user()->list();                               // 列出所有用户
-$auth->user()->changePassword('alice', 'newpass');    // 修改密码
-$auth->user()->grantRole('alice', 'admin');          // 授权角色
-$auth->user()->revokeRole('alice', 'admin');         // 撤销角色
-$auth->user()->delete('alice');                      // 删除用户
+// === manajemen pengguna ===
+$auth->user()->add('alice', 'password123');          // buat pengguna
+$auth->user()->get('alice');                         // lihat pengguna beserta perannya
+$auth->user()->list();                               // daftar semua pengguna
+$auth->user()->changePassword('alice', 'newpass');    // ubah kata sandi
+$auth->user()->grantRole('alice', 'admin');          // berikan peran
+$auth->user()->revokeRole('alice', 'admin');         // cabut peran
+$auth->user()->delete('alice');                      // hapus pengguna
 
-// === 角色管理 ===
-$auth->role()->add('reader');                        // 创建角色
-$auth->role()->get('reader');                        // 查看角色权限
-$auth->role()->list();                               // 列出所有角色
+// === manajemen peran ===
+$auth->role()->add('reader');                        // buat peran
+$auth->role()->get('reader');                        // lihat izin peran
+$auth->role()->list();                               // daftar semua peran
 
-// 授予权限（permType: 0=READ, 1=WRITE, 2=READWRITE）
-$auth->role()->grantPermission('reader', 0, '/data/', "\0");   // 对 /data/ 前缀的读权限
-$auth->role()->grantPermission('writer', 2, '/data/', "\0");   // 读写权限
-$auth->role()->revokePermission('reader', '/data/', "\0");     // 撤销权限
+// berikan izin (permType: 0=READ, 1=WRITE, 2=READWRITE)
+$auth->role()->grantPermission('reader', 0, '/data/', "\0");   // izin baca untuk prefix /data/
+$auth->role()->grantPermission('writer', 2, '/data/', "\0");   // izin baca-tulis
+$auth->role()->revokePermission('reader', '/data/', "\0");     // cabut izin
 $auth->role()->delete('reader');
 
-// === 认证开关 ===
-$auth->enable();           // 开启认证
-$auth->disable();          // 关闭认证
+// === saklar autentikasi ===
+$auth->enable();           // aktifkan autentikasi
+$auth->disable();          // matikan autentikasi
 $status = $auth->status(); // ['enabled' => true, 'authRevision' => 5]
 ```
 
-**Catatan:** setelah auth diaktifkan, klien wajib dikonfigurasi dengan `auth.user` dan `auth.password` agar bisa terus beroperasi.
+**Bagaimana autentikasi terjadi:** etcd v3 tidak menerima HTTP Basic — ia menuntut kredensial ditukar dulu dengan token (`POST /v3/auth/authenticate`), lalu token dikirim apa adanya sebagai `Authorization: <token>` (awalan `Bearer` juga ditolak). Bila `auth.user` / `auth.password` diisi, klien melakukannya **secara otomatis** dan menyimpan token di cache, serta mengautentikasi ulang sekali saat menerima 401 — tanpa pemanggilan manual. Anda juga bisa menukarnya sendiri:
+
+```php
+$token = $etcd->auth()->authenticate('root', 'secret');  // token yang didapat akan dipakai ulang oleh permintaan berikutnya
+```
+
+Mengirim kredensial butuh `scheme => 'https'`: pada http polos konstruktor langsung menolak (agar kata sandi tidak pernah terkirim terbuka).
 
 ### Cluster — Manajemen Klaster
 
 ```php
-// 查看集群成员
+// lihat anggota klaster
 $members = $etcd->cluster()->memberList();
 
-// 添加成员
-$etcd->cluster()->memberAdd(['http://node3:2380']);        // 添加 Voting 成员
-$etcd->cluster()->memberAdd(['http://node4:2380'], true);  // 添加 Learner 成员
+// tambah anggota
+$etcd->cluster()->memberAdd(['http://node3:2380']);        // tambah anggota Voting
+$etcd->cluster()->memberAdd(['http://node4:2380'], true);  // tambah anggota Learner
 
-// 修改成员 peer URL
+// ubah peer URL anggota
 $etcd->cluster()->memberUpdate(123456, ['http://newnode:2380']);
 
-// Learner 提升为 Voter
+// promosikan Learner menjadi Voter
 $etcd->cluster()->memberPromote(789012);
 
-// 移除成员
+// hapus anggota
 $etcd->cluster()->memberRemove(345678);
 ```
 
 ### Maintenance — Operasional
 
 ```php
-// 查看节点状态
+// lihat status node
 $status = $etcd->maintenance()->status();
 // ['version' => '3.5.0', 'dbSize' => 24576, 'leader' => 123, 'raftIndex' => 1000, ...]
 
-// 告警管理
-$alarms = $etcd->maintenance()->alarm();                    // 查看告警
-$etcd->maintenance()->alarm(action: 2, alarm: 1);           // 清除 NOSPACE 告警
+// manajemen alarm
+$alarms = $etcd->maintenance()->alarm();                    // lihat alarm
+$etcd->maintenance()->alarm(action: 2, alarm: 1);           // bersihkan alarm NOSPACE
 
-// 碎片整理（回收存储空间）
+// defragmentasi (ambil kembali ruang penyimpanan)
 $etcd->maintenance()->defragment();
 
-// KV 哈希校验
+// verifikasi hash KV
 $hash = $etcd->maintenance()->hash();
 
-// 获取快照（返回二进制数据，写入文件即可）
+// ambil snapshot (mengembalikan data biner, tinggal tulis ke file)
 $snapshot = $etcd->maintenance()->snapshot();
 file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 ```
@@ -310,13 +336,9 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 |------|------|------|---------|
 | **HTTP** | Tersedia | ext-curl / stream / PSR-18 (salah satu) | tanpa dependensi ekstensi, langsung jalan |
 | **gRPC** | Kerangka | ext-grpc + grpc/grpc + google/protobuf | throughput tinggi, streaming native |
-| **auto** | Default | deteksi otomatis | pakai gRPC bila tersedia, jika tidak HTTP |
+| **auto** | Default | — | saat ini sama dengan `http` (lihat di bawah) |
 
-Logika deteksi mode `auto`:
-1. `extension_loaded('grpc')` — apakah ekstensi C sudah dimuat?
-2. `class_exists('Grpc\BaseStub')` — apakah paket composer `grpc/grpc` sudah terpasang?
-
-Klien baru memakai gRPC bila keduanya terpenuhi; jika tidak, ia kembali ke HTTP.
+`auto` setara dengan `http`: `GrpcTransport` masih berupa kerangka (ketiga metodenya melempar exception), jadi ia **tidak** beralih sendiri ke gRPC — benar-benar memeriksa `ext-grpc` hanya akan membuat pengguna yang memasang ekstensi itu justru tidak bisa memakainya. Hanya `'transport' => 'grpc'` yang diminta secara eksplisit yang memilihnya. Setelah gRPC selesai, maknanya akan berubah.
 
 ### Konfigurasi Manual Klien HTTP PSR-18
 
@@ -340,12 +362,12 @@ $transport->setHttpClient(
 Langsung pakai setelah instalasi. `extra.laravel` pada composer.json menemukan ServiceProvider dan Facade secara otomatis.
 
 ```php
-// Facade 方式
+// cara Facade
 use Etcd;
 Etcd::kv()->put('/foo', 'bar');
 $val = Etcd::kv()->get('/foo');
 
-// 依赖注入方式
+// cara dependency injection
 use Erikwang2013\Etcd\EtcdClient;
 
 class MyService
@@ -393,7 +415,7 @@ class MyService
     }
 }
 
-// 或者直接 make
+// atau langsung make
 $etcd = make(EtcdClient::class);
 ```
 
@@ -419,11 +441,11 @@ return [
 Pemakaian:
 
 ```php
-// Facade 方式
+// cara Facade
 use think\facade\Etcd;
 Etcd::kv()->put('/key', 'value');
 
-// 容器方式
+// cara container
 app('etcd')->kv()->get('/key');
 ```
 
@@ -453,13 +475,13 @@ use Erikwang2013\Etcd\Exception\{
 try {
     $etcd->kv()->put('/key', 'value');
 } catch (ConnectionException $e) {
-    // etcd 节点无法连接（网络故障、宕机）
+    // node etcd tidak bisa dihubungi (gangguan jaringan, mati)
 } catch (AuthException $e) {
-    // 认证失败（用户名密码错误）
+    // autentikasi gagal (nama pengguna atau kata sandi salah)
 } catch (KeyNotFoundException $e) {
-    // getOrFail() 时 key 不存在
+    // key tidak ada saat getOrFail()
 } catch (EtcdException $e) {
-    // 其他 etcd 服务端错误
+    // error lain dari server etcd
 }
 ```
 
@@ -467,50 +489,48 @@ try {
 
 ```
 erikwang2013/etcd/
-├── composer.json                    # 包定义：PSR-4 自动加载 + Laravel / Hyperf 自动发现
-├── phpunit.xml                      # PHPUnit 配置（unit / integration 两套套件）
-├── config/etcd.php                  # 默认配置，供各框架发布（读取 ETCD_* 环境变量）
-├── .github/workflows/release.yml    # 打 tag 时自动发布
+├── composer.json                    # definisi paket: autoload PSR-4 + auto-discovery Laravel / Hyperf
+├── phpunit.xml.dist                 # konfigurasi PHPUnit (dua suite: unit / integration)
+├── .github/workflows/ci.yml         # gate sebelum merge: matriks unit test / batas sintaks / integrasi / dokumen i18n
+├── config/etcd.php                  # konfigurasi default untuk dipublikasikan tiap framework (membaca variabel environment ETCD_*)
+├── .github/workflows/release.yml    # rilis otomatis saat tag dibuat
 ├── scripts/i18n/                    #   perkakas doks: katalog, pembuat diagram, pemeriksaan terjemahan
-├── docs/                            # 文档与设计图
-│   ├── design-cn.md                 #   设计文档
+├── docs/                            # dokumentasi dan diagram desain
+│   ├── design-cn.md                 #   dokumen desain
 │   ├── i18n/                        #   README dan diagram terlokalisasi dalam 13 bahasa
-│   ├── pet.svg                      #   项目宠物 Etchy
-│   ├── architecture.svg             #   架构设计图
-│   ├── features.svg                 #   功能设计图
-│   └── lifecycle.svg                #   生命周期图
+│   ├── pet.svg                      #   maskot proyek Etchy
+│   ├── architecture.svg             #   diagram arsitektur
+│   ├── features.svg                 #   diagram fitur
+│   └── lifecycle.svg                #   diagram siklus hidup
 ├── src/
-│   ├── EtcdClient.php               # 顶层门面 + 单例：kv / watch / lease / auth / cluster / maintenance
-│   ├── Mascot.php                   # 项目宠物 Etchy 的取值入口（svg / dataUri / path）
-│   ├── Install.php                  # Webman 插件钩子（WEBMAN_PLUGIN）
-│   ├── Transport/                   # 传输层
-│   │   ├── TransportInterface.php   #   传输抽象：send / sendRaw / watch
-│   │   ├── TransportSelector.php    #   auto / http / grpc 自动选择
-│   │   ├── HttpTransport.php        #   HTTP JSON 传输（完整可用）
-│   │   └── GrpcTransport.php        #   gRPC 传输（骨架）
-│   ├── Kv/KvClient.php              # KV 读写 / 前缀扫描 / 事务 / 压缩
-│   ├── Watch/WatchClient.php        # Watch 变更监听 + 断线续订
-│   ├── Lease/LeaseClient.php        # Lease 租约 grant / keepAlive / revoke
-│   ├── Auth/                        # Auth 认证授权
-│   │   ├── AuthClient.php           #   认证开关与状态
-│   │   ├── UserClient.php           #   用户 CRUD + 角色绑定
-│   │   └── RoleClient.php           #   角色 CRUD + 权限
-│   ├── Cluster/ClusterClient.php    # Cluster 集群成员管理
-│   ├── Maintenance/                 # Maintenance 运维：status / alarm / defrag / snapshot
-│   ├── Exception/                   # 异常层次
-│   ├── Protobuf/                    # 消息桩（纯 PHP 数据类，不继承 Message）
-│   │   ├── Mvccpb/                  #   KeyValue、Event
-│   │   ├── Etcdserverpb/            #   60+ 请求 / 响应消息
-│   │   └── Authpb/                  #   User、Role、Permission
-│   └── Adapter/                     # 框架适配器
+│   ├── EtcdClient.php               # facade teratas + singleton: kv / watch / lease / auth / cluster / maintenance
+│   ├── Mascot.php                   # pintu masuk maskot proyek Etchy (svg / dataUri / path)
+│   ├── Install.php                  # hook plugin Webman (WEBMAN_PLUGIN)
+│   ├── Transport/                   # lapisan transport
+│   │   ├── TransportInterface.php   #   abstraksi transport: send / sendRaw / watch
+│   │   ├── TransportSelector.php    #   pemilihan otomatis auto / http / grpc
+│   │   ├── HttpTransport.php        #   transport HTTP JSON (sudah lengkap)
+│   │   └── GrpcTransport.php        #   transport gRPC (kerangka)
+│   ├── Kv/KvClient.php              # baca-tulis KV / pemindaian prefix / transaksi / kompaksi
+│   ├── Watch/WatchClient.php        # pemantauan perubahan Watch + langganan ulang saat terputus
+│   ├── Lease/LeaseClient.php        # sewa Lease grant / keepAlive / revoke
+│   ├── Auth/                        # Auth autentikasi dan otorisasi
+│   │   ├── AuthClient.php           #   saklar dan status autentikasi
+│   │   ├── UserClient.php           #   CRUD pengguna + pengikatan peran
+│   │   └── RoleClient.php           #   CRUD peran + izin
+│   ├── Cluster/ClusterClient.php    # Cluster manajemen anggota klaster
+│   ├── Maintenance/                 # Maintenance operasional: status / alarm / defrag / snapshot
+│   ├── Exception/                   # hierarki exception
+│   ├── Support/KeyValue.php         # dekode bersama: pembacaan KV dan event watch mengembalikan bentuk yang sama
+│   └── Adapter/                     # adapter framework
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider
 │       ├── ThinkPHP/                #   Service + Facade
 │       └── Webman/                  #   Plugin
 └── tests/
-    ├── Unit/                        # 单元测试（逐客户端 / 传输 / 适配器 / 消息类）
-    ├── Integration/                 # 集成测试（对接真实 etcd）
-    └── Support/                     # FakeTransport、PSR HTTP 桩
+    ├── Unit/                        # unit test (per klien / transport / adapter / kelas pesan)
+    ├── Integration/                 # integration test (terhadap etcd sungguhan)
+    └── Support/                     # FakeTransport, stub PSR HTTP
 ```
 
 ## Arsitektur dan Diagram Desain
@@ -542,9 +562,9 @@ Grafik ikut dipublikasikan bersama paket dan `Mascot` adalah satu-satunya pintu 
 ```php
 use Erikwang2013\Etcd\Mascot;
 
-echo Mascot::svg();                                          // SVG 源码，直接内联
-echo '<img src="' . Mascot::dataUri() . '" alt="Etchy">';    // data URI，不依赖 web 目录
-copy(Mascot::path(), __DIR__ . '/public/etcd.svg');          // 或自行落到静态目录
+echo Mascot::svg();                                          // kode sumber SVG, langsung di-inline
+echo '<img src="' . Mascot::dataUri() . '" alt="Etchy">';    // data URI, tidak bergantung pada direktori web
+copy(Mascot::path(), __DIR__ . '/public/etcd.svg');          // atau salin sendiri ke direktori statis
 ```
 
 Di Laravel, aset bisa langsung diterbitkan ke `public/`:

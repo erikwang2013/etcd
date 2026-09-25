@@ -31,6 +31,8 @@ class EtcdClient
     private ?ClusterClient $clusterClient = null;
     private ?MaintenanceClient $maintenanceClient = null;
     private array $config;
+    /** The caller's own config, before defaults were merged, so instance() can tell "same" from "different". */
+    private array $provided;
 
     private static ?self $instance = null;
 
@@ -39,6 +41,7 @@ class EtcdClient
      */
     public function __construct(array $config = [])
     {
+        $this->provided = $config;
         $this->config = array_merge(
             ['endpoints' => ['127.0.0.1:2379'], 'transport' => 'auto', 'scheme' => 'http', 'timeout' => 5.0, 'retry' => 2],
             $config
@@ -54,9 +57,12 @@ class EtcdClient
     public static function instance(array $config = []): self
     {
         if (self::$instance === null) {
-            self::$instance = new self($config);
-        } elseif (!empty($config)) {
-            throw new \LogicException('EtcdClient::instance() called with config after singleton already initialized. Call resetInstance() first if you need to reinitialize.');
+            return self::$instance = new self($config);
+        }
+        // Passing the same config again is harmless; only a *different* one is
+        // a programming error worth refusing.
+        if ($config !== [] && $config !== self::$instance->provided) {
+            throw new \LogicException('EtcdClient::instance() called with a different config after the singleton was initialized. Call resetInstance() first if you need to reinitialize.');
         }
         return self::$instance;
     }

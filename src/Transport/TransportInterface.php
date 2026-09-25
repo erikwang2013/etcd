@@ -14,12 +14,12 @@ namespace Erikwang2013\Etcd\Transport;
 
 interface TransportInterface
 {
-    public function send(string $path, array $body): array;
+    public function send(string $path, array $body, ?float $timeout = null): array;
 
     /**
      * Send a request and return the raw response body (for binary endpoints like snapshot).
      */
-    public function sendRaw(string $path): string;
+    public function sendRaw(string $path, ?float $timeout = null): string;
 
     /**
      * @param callable $onEvent  function(array $events): void

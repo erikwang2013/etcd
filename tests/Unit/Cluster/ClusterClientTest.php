@@ -100,6 +100,52 @@ class ClusterClientTest extends TestCase
     }
 
     #[Test]
+    public function memberListKeepsUint64IdsThatDoNotFitInAnIntAsStrings(): void
+    {
+        $transport = new FakeTransport();
+        // measured on etcd 3.5.17
+        $transport->addResponse(['members' => [['ID' => '10276657743932975437', 'name' => 'default']]]);
+        $client = new ClusterClient($transport);
+
+        $members = $client->memberList()['members'];
+
+        $this->assertSame('10276657743932975437', $members[0]['ID']);
+        $this->assertSame('default', $members[0]['name']);
+    }
+
+    #[Test]
+    public function memberListIdsRoundTripIntoMemberRemove(): void
+    {
+        $transport = new FakeTransport();
+        $transport->addResponse(['members' => [['ID' => '10276657743932975437']]]);
+        $transport->addResponse([]);
+        $client = new ClusterClient($transport);
+
+        // the natural round-trip: casting the id to int here would target a
+        // different member, and strict_types would reject it outright.
+        $client->memberRemove($client->memberList()['members'][0]['ID']);
+
+        $this->assertSame(
+            ['/v3/cluster/member/remove', ['ID' => '10276657743932975437']],
+            $transport->sent[1]
+        );
+    }
+
+    #[Test]
+    public function memberIdsThatFitStayInts(): void
+    {
+        $transport = new FakeTransport();
+        $transport->addResponse(['members' => [['ID' => '7']]]);
+        $transport->addResponse([]);
+        $client = new ClusterClient($transport);
+
+        $this->assertSame(7, $client->memberList()['members'][0]['ID']);
+
+        $client->memberRemove(7);
+        $this->assertSame(['/v3/cluster/member/remove', ['ID' => 7]], $transport->sent[1]);
+    }
+
+    #[Test]
     public function memberPromoteSendsId(): void
     {
         $transport = new FakeTransport();
@@ -111,6 +157,27 @@ class ClusterClientTest extends TestCase
 
         $this->assertSame(['/v3/cluster/member/promote', ['ID' => 3]], $transport->sent[0]);
         $this->assertSame($members, $result['members']);
+    }
+
+    #[Test]
+    public function memberUpdateAndPromoteAcceptStringIdsUnchanged(): void
+    {
+        $transport = new FakeTransport();
+        $transport->addResponse([]);
+        $transport->addResponse([]);
+        $client = new ClusterClient($transport);
+
+        $client->memberUpdate('10276657743932975437', ['http://9.9.9.9:2379']);
+        $client->memberPromote('10276657743932975437');
+
+        $this->assertSame(
+            ['/v3/cluster/member/update', ['ID' => '10276657743932975437', 'peerURLs' => ['http://9.9.9.9:2379']]],
+            $transport->sent[0]
+        );
+        $this->assertSame(
+            ['/v3/cluster/member/promote', ['ID' => '10276657743932975437']],
+            $transport->sent[1]
+        );
     }
 
     #[Test]

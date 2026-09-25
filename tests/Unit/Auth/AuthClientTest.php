@@ -7,6 +7,7 @@ namespace Erikwang2013\Etcd\Tests\Unit\Auth;
 use Erikwang2013\Etcd\Auth\AuthClient;
 use Erikwang2013\Etcd\Auth\RoleClient;
 use Erikwang2013\Etcd\Auth\UserClient;
+use Erikwang2013\Etcd\Exception\AuthException;
 use Erikwang2013\Etcd\Tests\Support\FakeTransport;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -41,7 +42,7 @@ class AuthClientTest extends TestCase
 
         $result = $auth->enable();
 
-        $this->assertSame([['/v3/auth/auth/enable', []]], $transport->sent);
+        $this->assertSame([['/v3/auth/enable', []]], $transport->sent);
         $this->assertSame(['header' => ['cluster_id' => '123']], $result);
     }
 
@@ -64,7 +65,7 @@ class AuthClientTest extends TestCase
 
         $result = $auth->disable();
 
-        $this->assertSame([['/v3/auth/auth/disable', []]], $transport->sent);
+        $this->assertSame([['/v3/auth/disable', []]], $transport->sent);
         $this->assertSame(['header' => ['cluster_id' => '123']], $result);
     }
 
@@ -80,7 +81,7 @@ class AuthClientTest extends TestCase
 
         $result = $auth->status();
 
-        $this->assertSame([['/v3/auth/auth/status', []]], $transport->sent);
+        $this->assertSame([['/v3/auth/status', []]], $transport->sent);
         $this->assertSame(['cluster_id' => '123'], $result['header']);
     }
 
@@ -115,5 +116,42 @@ class AuthClientTest extends TestCase
         $result = (new AuthClient($transport))->status();
 
         $this->assertSame(0, $result['authRevision']);
+    }
+
+    #[Test]
+    public function authenticatePostsCredentialsAndReturnsTheToken(): void
+    {
+        $transport = (new FakeTransport())->addResponse(['token' => 'tok-abc']);
+        $auth = new AuthClient($transport);
+
+        $token = $auth->authenticate('root', 'rootpw');
+
+        $this->assertSame([['/v3/auth/authenticate', ['name' => 'root', 'password' => 'rootpw']]], $transport->sent);
+        $this->assertSame('tok-abc', $token);
+    }
+
+    #[Test]
+    public function authenticateThrowsWhenNoTokenComesBack(): void
+    {
+        $transport = (new FakeTransport())->addResponse(['header' => []]);
+
+        $this->expectException(AuthException::class);
+        (new AuthClient($transport))->authenticate('root', 'rootpw');
+    }
+
+    #[Test]
+    public function authPathsAreNotDoubled(): void
+    {
+        $transport = new FakeTransport();
+        $auth = new AuthClient($transport);
+
+        $auth->enable();
+        $auth->disable();
+        $auth->status();
+
+        $this->assertSame(
+            ['/v3/auth/enable', '/v3/auth/disable', '/v3/auth/status'],
+            array_column($transport->sent, 0)
+        );
     }
 }

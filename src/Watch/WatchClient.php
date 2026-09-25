@@ -39,7 +39,9 @@ class WatchClient
     public function watch(string $key, callable $onEvent, array $options = []): void
     {
         $rangeEnd = $options['rangeEnd'] ?? '';
-        $startRevision = $options['startRevision'] ?? 0;
+        // cast here: the transport takes an int, and a numeric string from
+        // user config would otherwise be a TypeError under strict types
+        $startRevision = (int) ($options['startRevision'] ?? 0);
         $watchOpts = [];
         if (!empty($options['prevKv'])) {
             $watchOpts['prevKv'] = true;
