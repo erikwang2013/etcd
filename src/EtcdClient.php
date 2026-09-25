@@ -20,6 +20,8 @@ use Erikwang2013\Etcd\Lease\LeaseClient;
 use Erikwang2013\Etcd\Auth\AuthClient;
 use Erikwang2013\Etcd\Cluster\ClusterClient;
 use Erikwang2013\Etcd\Maintenance\MaintenanceClient;
+use Erikwang2013\Etcd\Election\ElectionClient;
+use Erikwang2013\Etcd\Lock\LockClient;
 
 class EtcdClient
 {
@@ -30,6 +32,8 @@ class EtcdClient
     private ?AuthClient $authClient = null;
     private ?ClusterClient $clusterClient = null;
     private ?MaintenanceClient $maintenanceClient = null;
+    private ?ElectionClient $electionClient = null;
+    private ?LockClient $lockClient = null;
     private array $config;
     /** The caller's own config, before defaults were merged, so instance() can tell "same" from "different". */
     private array $provided;
@@ -123,6 +127,16 @@ class EtcdClient
     public function maintenance(): MaintenanceClient
     {
         return $this->maintenanceClient ??= new MaintenanceClient($this->transport);
+    }
+
+    public function election(): ElectionClient
+    {
+        return $this->electionClient ??= new ElectionClient($this->transport);
+    }
+
+    public function lock(): LockClient
+    {
+        return $this->lockClient ??= new LockClient($this->transport);
     }
 
     public function transport(): TransportInterface

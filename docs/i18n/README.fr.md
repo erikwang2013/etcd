@@ -25,7 +25,7 @@
   il garde vos configurations et vos leases : coupé, il se reconnecte ; expiré, il nettoie tout seul.
 </p>
 
-Client PHP pour etcd v3 — transport double gRPC + HTTP, couvre toute l'API etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance), prêt à l'emploi avec **Laravel / Hyperf / ThinkPHP / Webman**.
+Client PHP pour etcd v3 — transport double (HTTP complet / gRPC pour les RPC unaires), couvre toute l'API etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock), prêt à l'emploi avec **Laravel / Hyperf / ThinkPHP / Webman**.
 
 ## Prérequis
 
@@ -221,6 +221,20 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
+**Arrêter un watch :** `watch()` bloque indéfiniment ; donnez-lui un `WatchHandle` et vous pourrez l'arrêter depuis l'extérieur (le besoin habituel d'un processus longue durée qui se termine sur SIGTERM) :
+
+```php
+use Erikwang2013\Etcd\Support\WatchHandle;
+
+$handle = new WatchHandle();
+pcntl_async_signals(true);
+pcntl_signal(SIGTERM, fn() => $handle->cancel());
+
+$etcd->watch()->watchPrefix('/config/', $onEvent, ['handle' => $handle]);
+```
+
+Après `cancel()`, `watch()` **revient normalement** (aucune exception, rien à intercepter). Même sur une clé inactive, il sort en une seconde environ — le driver curl le détecte via le callback périodique de cURL, le driver stream via un cycle d'inactivité avec un délai de lecture de 200 ms.
+
 **Reconnexion :** en cas de coupure, le Watch se réabonne à partir de `lastRevision + 1` (`start_revision` est **inclusif**, reprendre à l'ancienne valeur rejouerait le dernier événement). Le basculement ne perd aucun événement et n'en livre aucun deux fois.
 
 **Politique de réessai :** seuls les échecs qui prouvent que la connexion n'a jamais été établie (connexion refusée / échec DNS) sont réessayés, et les RPC en lecture seule (range, status, memberlist, etc.) tolèrent en plus les 5xx et les timeouts. Les écritures qui rencontrent un 5xx ou un timeout de lecture ne sont **pas** réessayées — la requête a peut-être déjà pris effet, et la rejouer applique un CAS deux fois, voire produit une « réponse faussement assurée » (le réessai voit sa propre première écriture et annonce un CAS en échec alors qu'il a en fait gagné).
@@ -308,6 +322,37 @@ $etcd->cluster()->memberPromote(789012);
 $etcd->cluster()->memberRemove(345678);
 ```
 
+### Election — élection de leader
+
+```php
+// candidature : prenez d'abord un lease, puis présentez-vous ; retour seulement une fois élu, les perdants attendent (borné par $timeout)
+$lease  = $etcd->lease()->grant(30);
+$leader = $etcd->election()->campaign('/my-election', 'node-a', $lease['ID'], 5.0);
+// → ['name' => ..., 'key' => ..., 'rev' => ..., 'lease' => ...]
+
+// leader actuel (null si personne n'est élu)
+$current = $etcd->election()->leader('/my-election');
+
+// céder sa place
+$etcd->election()->resign($leader);
+```
+
+Sur la passerelle HTTP, `campaign()` est une **réponse tamponnée** — elle ne revient qu'une fois élu, donc `$timeout` borne l'attente. Pour suivre les changements de leader dans la durée, utilisez `observe()`.
+
+**Attention (piège silencieux mesuré) :** `proclaim()` / `resign()` exigent un **tableau descripteur de leader complet** (name, key et rev tous présents). S'il en manque un, etcd renvoie **HTTP 200 sans rien faire** — on croit avoir libéré, alors que le leader est toujours là. Ces deux méthodes valident donc le descripteur avant l'envoi et lèvent une exception s'il est incomplet ; utilisez toujours les retours de `campaign()` / `leader()`, n'en fabriquez pas.
+
+**Autres comportements mesurés :** une candidature qui échoue en cours de requête est **retirée** par le serveur (un timeout d'`acquire()` peut donc signaler l'échec sans risque, sans devenir un « détenteur caché ») ; si personne n'est élu, `leader()` renvoie `null` (le serveur répond 500 `election: no leader`, un état normal et non une erreur).
+
+### Lock — verrou distribué
+
+```php
+$lock = $etcd->lock()->acquire('/my-lock', ttl: 30, timeout: 5.0);
+// ... section critique ...
+$etcd->lock()->release($lock);
+```
+
+**C'est une implémentation côté client bâtie sur Election, pas un verrou côté serveur.** La passerelle HTTP d'etcd 3.5 **n'expose pas** `/v3/lock/*` (mesuré : 404), l'exclusion mutuelle vient donc de « candidature Election + lease » — la même approche que le paquet Go `concurrency` d'etcd. Si le détenteur est tué par `SIGKILL`, le verrou se libère tout seul à l'expiration du lease, sans nettoyage manuel.
+
 ### Maintenance — exploitation
 
 ```php
@@ -328,6 +373,11 @@ $hash = $etcd->maintenance()->hash();
 // récupérer un snapshot (données binaires, à écrire dans un fichier)
 $snapshot = $etcd->maintenance()->snapshot();
 file_put_contents('/backup/etcd-snapshot.db', $snapshot);
+
+// pour une grosse base, écrire en flux sur le disque : ne pas charger toute la base en mémoire
+$bytes = $etcd->maintenance()->snapshotTo('/backup/etcd-snapshot.db');
+// écrit d'abord un fichier temporaire et ne renomme qu'après vérification du digest sha256
+// des 32 derniers octets, donc une écriture interrompue ne laisse jamais un fichier qui ressemble à une sauvegarde ; renvoie le nombre d'octets écrits.
 ```
 
 ## Modes de transport
@@ -335,10 +385,15 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 | Mode | État | Dépendances | Cas d'usage |
 |------|------|------|---------|
 | **HTTP** | disponible | ext-curl / flux / PSR-18 (au choix) | aucune extension requise, opérationnel immédiatement |
-| **gRPC** | squelette | ext-grpc + grpc/grpc + google/protobuf | hautes performances, streaming natif |
+| **gRPC** | RPC unaires | ext-grpc + grpc/grpc + messages protobuf générés | hautes performances ; streaming et Election passent par HTTP |
 | **auto** | par défaut | — | actuellement identique à `http` (voir ci-dessous) |
 
-`auto` équivaut à `http` : `GrpcTransport` n'est encore qu'un squelette (ses trois méthodes lèvent une exception), il ne bascule donc **pas** tout seul sur gRPC — sonder réellement `ext-grpc` ne ferait que priver d'usage les utilisateurs qui ont l'extension installée. Seul un `'transport' => 'grpc'` explicite le sélectionne. Quand gRPC sera là, cette sémantique changera.
+`auto` équivaut à `http` : gRPC ne couvre pour l'instant que les RPC unaires — les appels en streaming comme watch / snapshot, ainsi qu'Election, doivent toujours passer par HTTP ; basculer automatiquement retirerait silencieusement la moitié des fonctionnalités aux utilisateurs qui ont l'extension installée. Seul un `'transport' => 'grpc'` explicite le sélectionne.
+
+**État actuel du transport gRPC (à lire) :**
+- **Implémenté** : les RPC unaires (`send()`) — classes de messages générées avec `protoc` depuis le `rpc.proto` d'etcd v3.5 ; le corps de requête est assemblé en messages typés, noms et types de champs garantis par le proto.
+- **Non implémenté** : les appels en streaming comme watch et snapshot, ainsi que `/v3/election/*` (c'est un autre proto, `v3electionpb`) — ces chemins sont **refusés nommément** avec la raison, jamais d'échec silencieux.
+- **Pas de validation de bout en bout** : l'environnement de développement de ce projet n'a pas `ext-grpc`, donc l'ouverture du canal, les metadata d'identification, `_simpleRequest`, les délais et la correspondance des codes de statut sont **écrits à la main d'après le modèle de sortie de grpc_php_plugin et n'ont jamais été exercés par un appel réel**. La génération des messages et l'assemblage des requêtes sont testés, l'aller-retour réseau non. Si vous voulez utiliser gRPC, vérifiez-le vous-même avant la production.
 
 ### Configurer manuellement le client HTTP PSR-18
 
@@ -491,6 +546,7 @@ try {
 erikwang2013/etcd/
 ├── composer.json                    # définition du paquet : autoload PSR-4 + auto-découverte Laravel / Hyperf
 ├── phpunit.xml.dist                 # configuration PHPUnit (deux suites : unit / integration)
+├── protos/                          # proto amont d'etcd v3.5 + script de génération + sortie générée (pour gRPC)
 ├── .github/workflows/ci.yml         # garde-fou avant fusion : matrice unit / socle de syntaxe / intégration / doc i18n
 ├── config/etcd.php                  # configuration par défaut, publiée par chaque framework (lit les variables ETCD_*)
 ├── .github/workflows/release.yml    # publication automatique au tag
@@ -503,14 +559,15 @@ erikwang2013/etcd/
 │   ├── features.svg                 #   diagramme de conception fonctionnelle
 │   └── lifecycle.svg                #   diagramme de cycle de vie
 ├── src/
-│   ├── EtcdClient.php               # façade de plus haut niveau + singleton : kv / watch / lease / auth / cluster / maintenance
+│   ├── EtcdClient.php               # façade de plus haut niveau + singleton : accès aux huit sous-systèmes
 │   ├── Mascot.php                   # point d'entrée vers la mascotte Etchy (svg / dataUri / path)
 │   ├── Install.php                  # hook du plugin Webman (WEBMAN_PLUGIN)
 │   ├── Transport/                   # couche transport
 │   │   ├── TransportInterface.php   #   abstraction de transport : send / sendRaw / watch
 │   │   ├── TransportSelector.php    #   sélection automatique auto / http / grpc
 │   │   ├── HttpTransport.php        #   transport HTTP JSON (complet et opérationnel)
-│   │   └── GrpcTransport.php        #   transport gRPC (squelette)
+│   │   ├── GrpcTransport.php        #   transport gRPC (RPC unaires ; streaming refusé avec la raison)
+│   │   └── GrpcStub.php             #   sous-classe de Grpc\BaseStub (fichier séparé, non chargé sans l'extension)
 │   ├── Kv/KvClient.php              # lecture-écriture KV / balayage par préfixe / transactions / compaction
 │   ├── Watch/WatchClient.php        # écoute des changements Watch + réabonnement après coupure
 │   ├── Lease/LeaseClient.php        # baux Lease grant / keepAlive / revoke
@@ -519,9 +576,11 @@ erikwang2013/etcd/
 │   │   ├── UserClient.php           #   CRUD des utilisateurs + liaison des rôles
 │   │   └── RoleClient.php           #   CRUD des rôles + permissions
 │   ├── Cluster/ClusterClient.php    # gestion des membres du cluster Cluster
+│   ├── Election/                    # Election — élection (campaign / leader / observe / resign)
+│   ├── Lock/LockClient.php          # Lock — verrou distribué (bâti sur Election, la passerelle n'a pas /v3/lock/*)
 │   ├── Maintenance/                 # exploitation Maintenance : status / alarm / defrag / snapshot
 │   ├── Exception/                   # hiérarchie des exceptions
-│   ├── Support/KeyValue.php         # décodage partagé : la lecture KV et les événements watch renvoient la même forme
+│   ├── Support/                     # décodage partagé : KeyValue / Int64, WatchHandle d'annulation
 │   └── Adapter/                     # adaptateurs de framework
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider

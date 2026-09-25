@@ -6,7 +6,7 @@
 
 ## 设计目标
 
-- **双模传输**：gRPC 原生协议（高性能、完整流式支持）与 HTTP JSON 网关（零扩展依赖、开箱即用）自动切换
+- **双模传输**：HTTP JSON 网关（全功能、零扩展依赖）与 gRPC 原生协议（一元 RPC 已实现，流式待补；需 ext-grpc）
 - **全功能覆盖**：KV 存储、Watch 监听、Lease 租约、Auth 认证授权、Cluster 集群管理、Maintenance 运维操作
 - **框架无关核心**：不绑定任何框架；HTTP 通道按 ext-curl → PHP 流封装 → PSR-18 自动降级，PSR 接口本身是可选的
 - **框架适配层**：为每个目标框架提供符合其插件规范的适配器（ServiceProvider / Facade / ConfigProvider 等）
@@ -45,13 +45,16 @@
 
 ### 设计决策
 
-**为什么删掉了手写的 protobuf 桩？**  
+**手写桩删掉之后怎么走？**  
+gRPC 的消息层改为**从上游 proto 生成**：`protos/` 放 etcd v3.5 的 `rpc.proto`、`kv.proto`、`auth.proto` 与生成脚本，产物提交在 `protos/generated/`（`composer.json` 里映射为 `Erikwang2013\Etcd\Proto\`）。这与手写桩的关键差别是：序列化能力与字段类型由 protoc 保证，而不是靠人工维护。附带确认了一件事——早先"实例化 protobuf Message 子类会 SIGSEGV"的环境问题**已不复现**（实测 `serializeToString`/`mergeFromString` 可正常往返大整数），那正是当初手写桩存在的唯一理由。
+
+**（历史）为什么删掉了手写的 protobuf 桩？**  
 原先 `src/Protobuf/` 有 85 个手写消息类（约 1555 行）。它们**没有任何引用**、**不含任何序列化实现**，而且类型是错的：64 位字段用 `int`（网关发的是 JSON 字符串，uint64 还放不进 PHP 的 int）、枚举用 `int`（网关发的是名字如 `"DELETE"`/`"NOSPACE"`）、多个 repeated 字段连 setter 都没有。留着比删掉更危险——实现 gRPC 时会被当成地基。实现 gRPC 应从 etcd 的 `rpc.proto` 生成正式桩。
 
 **`auto` 为什么现在等同于 `http`？**  
 `GrpcTransport` 三个方法都还抛异常，所以自动探测 `ext-grpc` 只会让"装了扩展"的用户直接不可用。当前实现下 `auto` 与 `http` 完全等价，只有显式 `transport = grpc` 才会选中 gRPC。等 gRPC 真正实现后再恢复探测语义。
 
-## 六大系统
+## 八大系统
 
 ### 1. KV（键值存储）
 
@@ -159,6 +162,28 @@ maintenance().hash([revision])
 maintenance().snapshot()     → 通过 sendRaw() 走 PSR-18 返回原始二进制数据
 ```
 
+### 7. Election（选举）
+
+```
+election().campaign(name, value, lease, timeout)  → leader 描述符（当选前阻塞，用 timeout 兜底）
+election().proclaim(value, leader)                → 需完整描述符，否则服务端 200 但无效果
+election().leader(name)                           → 描述符或 null（无人当选时服务端回 500，属正常）
+election().observe(name, onLeader[, options])     → 前缀 watch + 重读 leader
+election().resign(leader)                         → 让位
+```
+
+**实测要点：** 网关把 `campaign` 当**缓冲响应**返回（当选才返回，不是流）；`observe` 则是永不关闭的 `{"result":…}` 流，网关不暴露，故用前缀 watch + 重读实现。
+
+### 8. Lock（分布式锁）
+
+```
+lock().acquire(name, ttl = 30, timeout = null)  → 锁描述符
+lock().release(lock)
+lock().leader(name)                             → 当前持有者
+```
+
+**这是客户端实现，不是服务端锁**：etcd 3.5 的 HTTP 网关不暴露 `/v3/lock/*`（实测 404），互斥由「Election 竞选 + 租约」提供——与 etcd 自家 Go 的 `concurrency` 包同一做法。持有者被 `SIGKILL` 后，租约到期自动释放（实测 TTL 5 秒时接管耗时 2.95 秒）。
+
 ## 传输层设计
 
 ### TransportInterface
@@ -184,11 +209,13 @@ interface TransportInterface {
 - **重试：** 连接级失败自动重试（默认 2 次，间隔 100ms），认证和服务器错误不重试
 - **Watch：** `fopen()` + `stream_context_create` 分块读取，非阻塞 I/O，断线自动重连
 
-### GrpcTransport（骨架）
+### GrpcTransport（一元 RPC）
 
-- **通道管理：** `Grpc\Channel` 实例复用（静态缓存）
-- **当前状态：** `send()` 和 `watch()` 抛出 `ConnectionException`（待实现）
-- **启用条件：** `extension_loaded('grpc')` AND `class_exists('Grpc\BaseStub')`
+- **消息层：** 从 etcd v3.5 上游 `rpc.proto` / `kv.proto` / `auth.proto` 用 `protoc --php_out` 生成（`protos/` 内存放上游 proto 与生成脚本，产物在 `protos/generated/`），请求体按类型化消息组装，字段名与类型由 proto 保证。
+- **通道管理：** `GrpcStub`（`Grpc\BaseStub` 子类）单独成文件——父类在文件加载时解析，缺 ext-grpc 的环境下不能连累 `GrpcTransport` 本身的加载。
+- **已实现：** 一元 `send()` / `sendRaw()`。
+- **未实现：** watch、snapshot 等流式调用，以及 `/v3/election/*`（属另一个 proto `v3electionpb`）。这些路径**按名字拒绝**并说明原因，不静默失败。
+- **验证边界（重要）：** 开发环境没有 `ext-grpc`，也没装 `grpc_php_plugin`，所以信道打开、凭据 metadata、`_simpleRequest`、超时与状态码映射都是照插件的输出模式手写、**未经真实往返验证**。消息生成、字段校验与请求组装有测试覆盖。
 
 ### TransportSelector（自动选择）
 
@@ -277,6 +304,7 @@ RuntimeException
 ```
 erikwang2013/etcd/
 ├── composer.json
+├── protos/                            # 上游 proto + 生成脚本 + 生成产物（Proto 命名空间）
 ├── config/etcd.php                    # 默认配置
 ├── README.md
 ├── docs/
@@ -290,7 +318,8 @@ erikwang2013/etcd/
 │   │   ├── TransportInterface.php     # 传输抽象
 │   │   ├── TransportSelector.php      # 自动选择逻辑
 │   │   ├── HttpTransport.php          # HTTP JSON 传输
-│   │   └── GrpcTransport.php          # gRPC 传输骨架
+│   │   ├── GrpcTransport.php          # gRPC 传输（一元 RPC）
+│   │   └── GrpcStub.php               # Grpc\BaseStub 子类（独立文件）
 │   ├── Kv/KvClient.php                # 键值操作
 │   ├── Watch/WatchClient.php          # 变更监听
 │   ├── Lease/LeaseClient.php          # 租约管理
@@ -299,8 +328,10 @@ erikwang2013/etcd/
 │   │   ├── UserClient.php             #   用户 CRUD
 │   │   └── RoleClient.php             #   角色 CRUD + 权限
 │   ├── Cluster/ClusterClient.php      # 集群成员管理
+│   ├── Election/ElectionClient.php    # 选举：campaign / proclaim / leader / observe / resign
+│   ├── Lock/LockClient.php            # 分布式锁（建在 Election 之上，网关无 /v3/lock/*）
 │   ├── Maintenance/MaintenanceClient.php  # 运维操作
-│   ├── Support/KeyValue.php           # 共用解码（KV 读取与 watch 事件同一形状）
+│   ├── Support/                       # KeyValue / Int64 共用解码、WatchHandle
 │   ├── Exception/                     # 异常层次
 │   └── Adapter/                       # 框架适配器
 │       ├── Laravel/

@@ -25,7 +25,7 @@
   তোমার কনফিগ আর লিজ পাহারা দেয়: কানেকশন গেলে নিজেই রিকানেক্ট, মেয়াদ শেষে নিজেই ক্লিনআপ।
 </p>
 
-PHP etcd v3 ক্লায়েন্ট —— gRPC + HTTP দ্বৈত ট্রান্সপোর্ট, etcd v3-এর সম্পূর্ণ API (KV / Watch / Lease / Auth / Cluster / Maintenance) কভার করে, আর **Laravel / Hyperf / ThinkPHP / Webman**-এ আউট-অব-দ্য-বক্স চলে।
+PHP etcd v3 ক্লায়েন্ট —— দ্বৈত মোড ট্রান্সপোর্ট (HTTP পূর্ণ সুবিধা / gRPC ইউনারি RPC), etcd v3-এর সম্পূর্ণ API (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock) কভার করে, আর **Laravel / Hyperf / ThinkPHP / Webman**-এ আউট-অব-দ্য-বক্স চলে।
 
 ## প্রয়োজনীয়তা
 
@@ -221,6 +221,20 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
+**watch থামানো:** `watch()` অনবরত ব্লক থাকে; তাকে একটি `WatchHandle` দিলে বাইরে থেকে থামানো যায় (SIGTERM-এ শেষ হওয়া দীর্ঘকালীন প্রসেসের চিরাচরিত প্রয়োজন):
+
+```php
+use Erikwang2013\Etcd\Support\WatchHandle;
+
+$handle = new WatchHandle();
+pcntl_async_signals(true);
+pcntl_signal(SIGTERM, fn() => $handle->cancel());
+
+$etcd->watch()->watchPrefix('/config/', $onEvent, ['handle' => $handle]);
+```
+
+`cancel()`-এর পর `watch()` **স্বাভাবিকভাবে ফেরে** (কোনো এক্সেপশন নয়, catch লাগে না)। খালি key-তেও এটি প্রায় এক সেকেন্ডের মধ্যে বেরিয়ে আসে — curl ড্রাইভার cURL-এর পর্যায়ক্রমিক কলব্যাক দিয়ে, stream ড্রাইভার 200ms রিড-টাইমআউটের আইডল চক্র দিয়ে।
+
 **ডিসকানেক্টে রিকানেক্ট:** Watch কানেকশন কেটে গেলে `lastRevision + 1` থেকে আবার সাবস্ক্রাইব হয় (`start_revision` **সহগামী**, পুরোনো মান দিয়ে চালু করলে শেষ ইভেন্টটি আবার চলে আসে)। ফেলওভারে কোনো ইভেন্ট হারায় না, দুবারও পৌঁছায় না।
 
 **রিট্রাই নীতি:** কেবল সেই ব্যর্থতাই আবার চেষ্টা করা হয় যা প্রমাণ করে কানেকশনই তৈরি হয়নি (কানেকশন রিফিউজড / DNS ব্যর্থতা), আর শুধু-পাঠ RPC (range, status, memberlist ইত্যাদি) এর বাইরে 5xx ও টাইমআউটও সহ্য করে। লেখার কাজ 5xx বা পড়ার টাইমআউটে **আবার চেষ্টা করা হয় না** — অনুরোধ আগেই কার্যকর হয়ে থাকতে পারে, আর আবার চালালে CAS-এর মতো অনুরোধ দুবার প্রয়োগ হয়, বা "আত্মবিশ্বাসী ভুল উত্তর" মেলে (রিট্রাই নিজের প্রথম লেখাটি দেখে CAS ব্যর্থ বলে জানায়, অথচ সেটি জিতেছিল)।
@@ -308,6 +322,37 @@ $etcd->cluster()->memberPromote(789012);
 $etcd->cluster()->memberRemove(345678);
 ```
 
+### Election — leader নির্বাচন
+
+```php
+// নির্বাচন: আগে lease নিন, তারপর প্রার্থী হোন; জিতলেই ফেরে, হেরে যাওয়ারা অপেক্ষা করে ($timeout দিয়ে সীমা)
+$lease  = $etcd->lease()->grant(30);
+$leader = $etcd->election()->campaign('/my-election', 'node-a', $lease['ID'], 5.0);
+// → ['name' => ..., 'key' => ..., 'rev' => ..., 'lease' => ...]
+
+// বর্তমান leader (কেউ নির্বাচিত না হলে null)
+$current = $etcd->election()->leader('/my-election');
+
+// পদ ছাড়া
+$etcd->election()->resign($leader);
+```
+
+HTTP গেটওয়েতে `campaign()` একটি **বাফারড রেসপন্স** — জেতার আগে ফেরে না, তাই অপেক্ষা সীমিত করতে `$timeout` দিন। দীর্ঘমেয়াদে leader পরিবর্তন ট্র্যাক করতে `observe()` ব্যবহার করুন।
+
+**লক্ষ্য করুন (মাপা নীরব ফাঁদ):** `proclaim()` / `resign()`-এর জন্য **সম্পূর্ণ leader ডেসক্রিপ্টর অ্যারে** দরকার (name, key, rev — তিনটিই থাকতে হবে)। একটিও বাদ পড়লে etcd **HTTP 200 ফিরিয়ে দেয় কিন্তু কিছুই করে না** — দেখে মনে হয় রিলিজ সফল, অথচ leader তখনও আছে। তাই এই দুটি মেথড পাঠানোর আগে ডেসক্রিপ্টর যাচাই করে এবং অসম্পূর্ণ হলে এক্সেপশন ছোড়ে; সবসময় `campaign()` / `leader()`-এর ফেরত মান ব্যবহার করুন, নিজে বানাবেন না।
+
+**অন্য মাপা আচরণ:** মাঝপথে ব্যর্থ নির্বাচন সার্ভার **প্রত্যাহার করে** (তাই `acquire()`-এর টাইমআউট নিরাপদে ব্যর্থতা জানাতে পারে, 'লুকানো ধারক' হয়ে যায় না); কেউ নির্বাচিত না হলে `leader()` `null` ফেরে (সার্ভার 500 `election: no leader` দেয়, যা স্বাভাবিক অবস্থা, ত্রুটি নয়)।
+
+### Lock — বিতরণকৃত লক
+
+```php
+$lock = $etcd->lock()->acquire('/my-lock', ttl: 30, timeout: 5.0);
+// ... ক্রিটিক্যাল সেকশন ...
+$etcd->lock()->release($lock);
+```
+
+**এটি Election-এর উপর তৈরি ক্লায়েন্ট-সাইড বাস্তবায়ন, সার্ভার-সাইড লক নয়।** etcd 3.5-এর HTTP গেটওয়ে `/v3/lock/*` **উন্মুক্ত করে না** (মাপা: 404), তাই মিউচুয়াল এক্সক্লুশন আসে «Election নির্বাচন + lease» থেকে — etcd-এর নিজের Go `concurrency` প্যাকেজের মতোই পদ্ধতি। ধারককে `SIGKILL` করলে lease শেষ হলেই লক নিজে থেকে ছাড়া হয়, হাতে পরিষ্কার করার দরকার নেই।
+
 ### Maintenance — অপারেশনস
 
 ```php
@@ -328,6 +373,11 @@ $hash = $etcd->maintenance()->hash();
 // স্ন্যাপশট নেওয়া (বাইনারি ডেটা ফেরায়, ফাইলে লিখলেই হয়)
 $snapshot = $etcd->maintenance()->snapshot();
 file_put_contents('/backup/etcd-snapshot.db', $snapshot);
+
+// বড় ডেটাবেসের জন্য ডিস্কে স্ট্রিম করুন: পুরো DB মেমোরিতে পড়বেন না
+$bytes = $etcd->maintenance()->snapshotTo('/backup/etcd-snapshot.db');
+// আগে একটি অস্থায়ী ফাইল লেখে এবং শেষ 32 বাইটের sha256 ডাইজেস্ট যাচাই
+// পাস হওয়ার পরেই নাম বদলায়, তাই মাঝপথে থেমে যাওয়া লেখা 'ব্যাকআপের মতো দেখতে' ফাইল রেখে যায় না; লেখা বাইট ফেরত দেয়।
 ```
 
 ## ট্রান্সপোর্ট মোড
@@ -335,10 +385,15 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 | মোড | অবস্থা | ডিপেন্ডেন্সি | উপযোগী ক্ষেত্র |
 |------|------|------|---------|
 | **HTTP** | প্রস্তুত | ext-curl / stream / PSR-18 (যেকোনো একটি) | এক্সটেনশন ডিপেন্ডেন্সি ছাড়াই সাথে সাথে চলে |
-| **gRPC** | স্কেলিটন | ext-grpc + grpc/grpc + google/protobuf | উচ্চ পারফরম্যান্স, নেটিভ স্ট্রিমিং |
+| **gRPC** | ইউনারি RPC | ext-grpc + grpc/grpc + জেনারেট করা protobuf মেসেজ | উচ্চ পারফরম্যান্স; স্ট্রিমিং ও Election-এর জন্য HTTP দরকার |
 | **auto** | ডিফল্ট | — | এখন `http`-এর সমান (নিচে দেখুন) |
 
-`auto` আর `http` সমান: `GrpcTransport` এখনও স্কেলিটন (তিনটি মেথডই এক্সেপশন ছোড়ে), তাই এটি নিজে থেকে gRPC-তে **যায় না** — সত্যিই `ext-grpc` খোঁজা কেবল যাঁরা এক্সটেনশন ইনস্টল করেছেন তাঁদেরই অচল করে দিত। স্পষ্টভাবে `'transport' => 'grpc'` দিলেই এটি বেছে নেওয়া হয়। gRPC এলেই এই অর্থ বদলাবে।
+`auto` আর `http` সমান: gRPC এখন শুধু ইউনারি RPC কভার করে — watch / snapshot-এর মতো স্ট্রিমিং কল আর Election এখনও HTTP দিয়েই যেতে হবে, তাই নিজে থেকে বদলে গেলে এক্সটেনশন ইনস্টল করা ব্যবহারকারীদের অর্ধেক সুবিধা চুপচাপ হারিয়ে যেত। স্পষ্টভাবে `'transport' => 'grpc'` দিলেই এটি বেছে নেওয়া হয়।
+
+**gRPC ট্রান্সপোর্টের বর্তমান অবস্থা (লক্ষ্য করুন):**
+- **যা আছে**: ইউনারি RPC (`send()`) — etcd v3.5-এর `rpc.proto` থেকে `protoc` দিয়ে তৈরি মেসেজ ক্লাস; রিকোয়েস্ট বডি টাইপড মেসেজ হিসেবে গঠিত হয়, আর ফিল্ডের নাম ও টাইপ proto নিশ্চিত করে।
+- **যা নেই**: watch, snapshot-এর মতো স্ট্রিমিং কল, এবং `/v3/election/*` (ওটা আলাদা proto, `v3electionpb`) — এই পাথগুলো **নাম ধরে প্রত্যাখ্যান** করা হয় ও কারণ জানানো হয়, চুপচাপ ফেল করে না।
+- **এন্ড-টু-এন্ড যাচাই নেই**: এই প্রজেক্টের ডেভেলপমেন্ট এনভায়রনমেন্টে `ext-grpc` নেই, তাই চ্যানেল খোলা, ক্রেডেনশিয়াল metadata, `_simpleRequest`, টাইমআউট আর স্টেটাস কোড ম্যাপিং সবই **grpc_php_plugin-এর আউটপুট প্যাটার্ন দেখে হাতে লেখা, কোনো সত্যিকারের কল দিয়ে চালানো হয়নি**। মেসেজ জেনারেশন আর রিকোয়েস্ট অ্যাসেম্বলির টেস্ট আছে, নেটওয়ার্ক রাউন্ড-ট্রিপের নেই। gRPC ব্যবহার করতে চাইলে প্রোডাকশনে যাওয়ার আগে নিজে যাচাই করুন।
 
 ### ম্যানুয়ালি PSR-18 HTTP ক্লায়েন্ট কনফিগার
 
@@ -491,6 +546,7 @@ try {
 erikwang2013/etcd/
 ├── composer.json                    # প্যাকেজ ডেফিনিশন: PSR-4 অটোলোড + Laravel / Hyperf অটো-ডিসকভারি
 ├── phpunit.xml.dist                 # PHPUnit কনফিগ (unit / integration দুটি স্যুট)
+├── protos/                          # etcd v3.5 আপস্ট্রিম proto + জেনারেশন স্ক্রিপ্ট + জেনারেট করা আউটপুট (gRPC-এর জন্য)
 ├── .github/workflows/ci.yml         # মার্জের আগে গেট: ইউনিট ম্যাট্রিক্স / সিনট্যাক্স বেসলাইন / ইন্টিগ্রেশন / i18n ডক্স
 ├── config/etcd.php                  # ডিফল্ট কনফিগ, ফ্রেমওয়ার্কে পাবলিশের জন্য (ETCD_* এনভায়রনমেন্ট ভেরিয়েবল পড়ে)
 ├── .github/workflows/release.yml    # tag দিলে স্বয়ংক্রিয় পাবলিশ
@@ -503,14 +559,15 @@ erikwang2013/etcd/
 │   ├── features.svg                 #   ফিচার ডায়াগ্রাম
 │   └── lifecycle.svg                #   লাইফসাইকল ডায়াগ্রাম
 ├── src/
-│   ├── EtcdClient.php               # টপ-লেভেল ফ্যাসাড + সিঙ্গলটন: kv / watch / lease / auth / cluster / maintenance
+│   ├── EtcdClient.php               # টপ-লেভেল ফ্যাসাড + সিঙ্গলটন: আটটি সাবসিস্টেমের অ্যাকসেসর
 │   ├── Mascot.php                   # প্রজেক্ট পেট Etchy পাওয়ার এন্ট্রি (svg / dataUri / path)
 │   ├── Install.php                  # Webman প্লাগইন হুক (WEBMAN_PLUGIN)
 │   ├── Transport/                   # ট্রান্সপোর্ট লেয়ার
 │   │   ├── TransportInterface.php   #   ট্রান্সপোর্ট অ্যাবস্ট্রাকশন: send / sendRaw / watch
 │   │   ├── TransportSelector.php    #   auto / http / grpc অটো সিলেকশন
 │   │   ├── HttpTransport.php        #   HTTP JSON ট্রান্সপোর্ট (সম্পূর্ণ প্রস্তুত)
-│   │   └── GrpcTransport.php        #   gRPC ট্রান্সপোর্ট (স্কেলিটন)
+│   │   ├── GrpcTransport.php        #   gRPC ট্রান্সপোর্ট (ইউনারি RPC; স্ট্রিমিং কারণসহ প্রত্যাখ্যাত)
+│   │   └── GrpcStub.php             #   Grpc\BaseStub-এর সাবক্লাস (আলাদা ফাইল, এক্সটেনশন না থাকলে লোড হয় না)
 │   ├── Kv/KvClient.php              # KV রিড-রাইট / prefix স্ক্যান / ট্রানজেকশন / কম্প্যাক্ট
 │   ├── Watch/WatchClient.php        # Watch পরিবর্তন মনিটরিং + ডিসকানেক্টে রিজিউম
 │   ├── Lease/LeaseClient.php        # Lease লিজ grant / keepAlive / revoke
@@ -519,9 +576,11 @@ erikwang2013/etcd/
 │   │   ├── UserClient.php           #   ইউজার CRUD + রোল বাইন্ডিং
 │   │   └── RoleClient.php           #   রোল CRUD + পারমিশন
 │   ├── Cluster/ClusterClient.php    # Cluster ক্লাস্টার সদস্য ম্যানেজমেন্ট
+│   ├── Election/                    # Election নির্বাচন (campaign / leader / observe / resign)
+│   ├── Lock/LockClient.php          # Lock বিতরণকৃত লক (Election-এর উপর; গেটওয়েতে /v3/lock/* নেই)
 │   ├── Maintenance/                 # Maintenance অপারেশনস: status / alarm / defrag / snapshot
 │   ├── Exception/                   # এক্সেপশন হায়ারার্কি
-│   ├── Support/KeyValue.php         # শেয়ারড ডিকোডিং: KV পড়া ও watch ইভেন্ট একই আকার ফেরায়
+│   ├── Support/                     # সাধারণ ডিকোডিং: KeyValue / Int64, WatchHandle বাতিল হ্যান্ডেল
 │   └── Adapter/                     # ফ্রেমওয়ার্ক অ্যাডাপ্টার
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider

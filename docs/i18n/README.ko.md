@@ -25,7 +25,7 @@
   당신의 설정과 리스를 지킵니다: 끊기면 스스로 재연결하고, 만료되면 스스로 정리합니다.
 </p>
 
-PHP etcd v3 클라이언트 —— gRPC + HTTP 이중 전송으로 etcd v3의 모든 API(KV / Watch / Lease / Auth / Cluster / Maintenance)를 지원하며, **Laravel / Hyperf / ThinkPHP / Webman**에 바로 붙습니다.
+PHP etcd v3 클라이언트 —— 이중 모드 전송(HTTP 전체 기능 / gRPC 일원 RPC)으로 etcd v3의 모든 API(KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock)를 지원하며, **Laravel / Hyperf / ThinkPHP / Webman**에 바로 붙습니다.
 
 ## 요구 사항
 
@@ -221,6 +221,20 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
+**감시 중지:** `watch()`는 계속 블로킹되므로 `WatchHandle`을 넘겨주면 외부에서 멈출 수 있습니다(장기 실행 프로세스가 SIGTERM으로 정리할 때 흔히 필요한 요구입니다):
+
+```php
+use Erikwang2013\Etcd\Support\WatchHandle;
+
+$handle = new WatchHandle();
+pcntl_async_signals(true);
+pcntl_signal(SIGTERM, fn() => $handle->cancel());
+
+$etcd->watch()->watchPrefix('/config/', $onEvent, ['handle' => $handle]);
+```
+
+`cancel()` 이후 `watch()`는 **정상 반환**합니다(예외를 던지지 않고 catch도 필요 없습니다). 유휴 key에서도 1초 안에 빠져나옵니다 — curl 드라이버는 cURL의 주기 콜백으로, stream 드라이버는 200ms 읽기 타임아웃 유휴 주기로 감지합니다.
+
 **끊김 후 재연결:** Watch 연결이 끊기면 `lastRevision + 1`부터 다시 구독합니다(`start_revision`은 **폐구간**이라 같은 값을 쓰면 마지막 이벤트가 재생됩니다). 장애 조치에서 이벤트를 잃지도, 중복 전달하지도 않습니다.
 
 **재시도 정책:** **연결이 아예 맺어지지 않은** 경우(연결 거부 / DNS 실패)에만 재시도하며, 읽기 전용 RPC(range, status, memberlist 등)는 5xx와 타임아웃까지 추가로 허용합니다. 쓰기 작업이 5xx나 읽기 타임아웃을 만나면 **재시도하지 않습니다** — 이미 반영되었을 수 있고, 재생하면 CAS 같은 요청이 두 번 적용되거나 "자신 있게 틀린 답"(재시도가 자신의 첫 쓰기 결과를 보고 실제로는 이겼는데 CAS 실패로 보고)을 받게 됩니다.
@@ -308,6 +322,37 @@ $etcd->cluster()->memberPromote(789012);
 $etcd->cluster()->memberRemove(345678);
 ```
 
+### Election — leader 선출
+
+```php
+// 선출: 리스를 먼저 받고 참여; 당선되어야 반환되고, 진 쪽은 기다립니다($timeout으로 상한)
+$lease  = $etcd->lease()->grant(30);
+$leader = $etcd->election()->campaign('/my-election', 'node-a', $lease['ID'], 5.0);
+// → ['name' => ..., 'key' => ..., 'rev' => ..., 'lease' => ...]
+
+// 현재 leader (당선자가 없으면 null 반환)
+$current = $etcd->election()->leader('/my-election');
+
+// 자리 양보
+$etcd->election()->resign($leader);
+```
+
+HTTP 게이트웨이에서 `campaign()`은 **버퍼 응답**입니다 — 당선되기 전에는 반환하지 않으므로 `$timeout`으로 대기를 제한하세요. leader 변화를 오래 추적하려면 `observe()`를 사용하세요.
+
+**주의(실측된 조용한 함정):** `proclaim()` / `resign()`에는 **완전한 leader 설명 배열**이 필요합니다(name, key, rev가 모두 있어야 합니다). 하나라도 빠지면 etcd는 **HTTP 200을 반환하면서 아무것도 하지 않습니다** — '해제 성공'처럼 보이지만 leader는 그대로입니다. 그래서 두 메서드는 전송 전에 설명자를 검증하고 불완전하면 예외를 던집니다. 항상 `campaign()` / `leader()`의 반환값을 쓰고 직접 만들지 마세요.
+
+**그 밖의 실측 동작:** 요청 도중 실패한 선출은 서버가 **철회**합니다(따라서 `acquire()` 타임아웃은 '숨은 보유자'가 되지 않고 안전하게 실패를 보고할 수 있습니다). 당선자가 없으면 `leader()`는 `null`을 반환합니다(서버는 500 `election: no leader`를 주는데, 이는 오류가 아니라 정상 상태입니다).
+
+### Lock — 분산 잠금
+
+```php
+$lock = $etcd->lock()->acquire('/my-lock', ttl: 30, timeout: 5.0);
+// ... 임계 구역 ...
+$etcd->lock()->release($lock);
+```
+
+**이것은 Election 위에 올린 클라이언트 구현이며 서버 측 잠금이 아닙니다.** etcd 3.5의 HTTP 게이트웨이는 `/v3/lock/*`를 **노출하지 않습니다**(실측 404). 그래서 상호 배제는 「Election 선출 + 리스」로 제공됩니다 — etcd 자체 Go `concurrency` 패키지와 같은 방식입니다. 보유자가 `SIGKILL`되면 리스가 만료된 뒤 잠금이 자동 해제되어 수동 정리가 필요 없습니다.
+
 ### Maintenance — 운영
 
 ```php
@@ -328,6 +373,11 @@ $hash = $etcd->maintenance()->hash();
 // 스냅샷 획득 (바이너리 반환, 파일로 쓰면 됨)
 $snapshot = $etcd->maintenance()->snapshot();
 file_put_contents('/backup/etcd-snapshot.db', $snapshot);
+
+// 대용량 DB는 스트리밍으로 디스크에: 데이터베이스 전체를 메모리로 읽지 않습니다
+$bytes = $etcd->maintenance()->snapshotTo('/backup/etcd-snapshot.db');
+// 먼저 임시 파일에 쓰고 끝 32바이트 sha256 다이제스트가 통과한 뒤에야 이름을 바꿉니다,
+// 따라서 중단되어도 '백업처럼 보이는' 파일이 남지 않습니다; 기록한 바이트 수를 반환합니다.
 ```
 
 ## 전송 모드
@@ -335,10 +385,15 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 | 모드 | 상태 | 의존성 | 적합한 경우 |
 |------|------|--------|-------------|
 | **HTTP** | 사용 가능 | ext-curl / stream / PSR-18 중 하나 | 확장 의존성 없이 바로 사용 |
-| **gRPC** | 골격 | ext-grpc + grpc/grpc + google/protobuf | 고성능, 네이티브 스트리밍 |
+| **gRPC** | 일원 RPC | ext-grpc + grpc/grpc + 생성된 protobuf 메시지 | 고성능; 스트리밍과 Election은 HTTP 필요 |
 | **auto** | 기본 | — | 현재 `http`와 동일 (아래 참조) |
 
-`auto`는 `http`와 같습니다: `GrpcTransport`는 아직 골격이라(세 메서드 모두 예외를 던짐) **자동으로** gRPC로 전환하지 **않습니다** — 실제로 `ext-grpc`를 탐지하면 확장을 설치한 사용자만 오히려 쓸 수 없게 됩니다. `'transport' => 'grpc'`를 명시적으로 넘겨야 선택됩니다. gRPC가 구현되면 이 의미도 바뀝니다.
+`auto`는 `http`와 같습니다: gRPC는 현재 일원 RPC만 지원하며 watch / snapshot 같은 스트리밍 호출과 Election은 여전히 HTTP를 거쳐야 하므로, 자동으로 전환하면 확장을 설치한 사용자의 기능이 조용히 절반으로 줄어듭니다. `'transport' => 'grpc'`를 명시적으로 넘겨야 선택됩니다.
+
+**gRPC 전송의 현재 상태(주의):**
+- **구현됨**: 일원 RPC(`send()`) — etcd v3.5의 `rpc.proto`에서 `protoc`로 메시지 클래스를 생성하며, 요청 본문은 타입이 지정된 메시지로 조립되고 필드 이름/타입은 proto가 보장합니다.
+- **미구현**: watch, snapshot 같은 스트리밍 호출과 `/v3/election/*`(별도의 proto인 `v3electionpb`입니다) — 이 경로들은 **이름으로 거부**되고 이유가 함께 설명되며, 조용히 실패하지 않습니다.
+- **엔드투엔드 미검증**: 이 프로젝트의 개발 환경에는 `ext-grpc`가 없어서 채널 열기, 자격 증명 metadata, `_simpleRequest`, 타임아웃과 상태 코드 매핑이 모두 **grpc_php_plugin의 출력 패턴을 보고 손으로 작성되었고 실제 호출로 검증된 적이 없습니다**. 메시지 생성과 요청 조립에는 테스트가 있지만 네트워크 왕복에는 없습니다. gRPC를 쓰려면 직접 검증한 뒤 운영에 투입하세요.
 
 ### PSR-18 HTTP 클라이언트 수동 설정
 
@@ -491,6 +546,7 @@ try {
 erikwang2013/etcd/
 ├── composer.json                    # 패키지 정의: PSR-4 오토로드 + Laravel / Hyperf 자동 검색
 ├── phpunit.xml.dist                 # PHPUnit 설정 (unit / integration 두 스위트)
+├── protos/                          # etcd v3.5 업스트림 proto + 생성 스크립트 + 생성 산출물 (gRPC용)
 ├── .github/workflows/ci.yml         # 병합 전 게이트: 단위 테스트 매트릭스 / 문법 기준선 / 통합 / i18n 문서
 ├── config/etcd.php                  # 기본 설정, 각 프레임워크 게시용 (ETCD_* 환경 변수 읽기)
 ├── .github/workflows/release.yml    # 태그 푸시 시 자동 릴리스
@@ -503,14 +559,15 @@ erikwang2013/etcd/
 │   ├── features.svg                 #   기능 설계도
 │   └── lifecycle.svg                #   생명주기 그림
 ├── src/
-│   ├── EtcdClient.php               # 최상위 파사드 + 싱글턴: kv / watch / lease / auth / cluster / maintenance
+│   ├── EtcdClient.php               # 최상위 파사드 + 싱글턴: 여덟 하위 시스템 접근자
 │   ├── Mascot.php                   # 프로젝트 펫 Etchy 접근 지점 (svg / dataUri / path)
 │   ├── Install.php                  # Webman 플러그인 훅 (WEBMAN_PLUGIN)
 │   ├── Transport/                   # 전송 계층
 │   │   ├── TransportInterface.php   #   전송 추상화: send / sendRaw / watch
 │   │   ├── TransportSelector.php    #   auto / http / grpc 자동 선택
 │   │   ├── HttpTransport.php        #   HTTP JSON 전송 (완전 사용 가능)
-│   │   └── GrpcTransport.php        #   gRPC 전송 (골격)
+│   │   ├── GrpcTransport.php        #   gRPC 전송 (일원 RPC; 스트리밍은 이유와 함께 거부)
+│   │   └── GrpcStub.php             #   Grpc\BaseStub 서브클래스 (별도 파일, 확장이 없으면 로드하지 않음)
 │   ├── Kv/KvClient.php              # KV 읽기/쓰기 / 접두사 스캔 / 트랜잭션 / 압축
 │   ├── Watch/WatchClient.php        # Watch 변경 감시 + 끊김 후 재개
 │   ├── Lease/LeaseClient.php        # Lease grant / keepAlive / revoke
@@ -519,9 +576,11 @@ erikwang2013/etcd/
 │   │   ├── UserClient.php           #   사용자 CRUD + 역할 바인딩
 │   │   └── RoleClient.php           #   역할 CRUD + 권한
 │   ├── Cluster/ClusterClient.php    # Cluster 클러스터 멤버 관리
+│   ├── Election/                    # Election 선출 (campaign / leader / observe / resign)
+│   ├── Lock/LockClient.php          # Lock 분산 잠금 (Election 위에 구현, 게이트웨이에 /v3/lock/* 없음)
 │   ├── Maintenance/                 # Maintenance 운영: status / alarm / defrag / snapshot
 │   ├── Exception/                   # 예외 계층
-│   ├── Support/KeyValue.php         # 공용 디코딩: KV 조회와 watch 이벤트가 같은 모양을 반환
+│   ├── Support/                     # KeyValue / Int64 공용 디코딩, WatchHandle 취소 핸들
 │   └── Adapter/                     # 프레임워크 어댑터
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider

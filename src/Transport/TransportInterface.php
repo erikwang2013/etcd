@@ -25,5 +25,21 @@ interface TransportInterface
      * @param callable $onEvent  function(array $events): void
      * @param array    $options  'prevKv' => bool, 'progressNotify' => bool
      */
+    /**
+     * Blocking watch. $options may carry prevKv, progressNotify and a
+     * Support\WatchHandle under 'handle' to stop the loop from outside.
+     */
     public function watch(string $key, string $rangeEnd, int $startRevision, callable $onEvent, array $options = []): void;
+
+    /**
+     * Read a byte-stream RPC without buffering it whole.
+     *
+     * /v3/maintenance/snapshot answers as NDJSON frames of base64 blobs; each
+     * decoded blob is handed to $onBlob as it arrives, so a multi-gigabyte
+     * database never has to fit in memory.
+     *
+     * @param callable(string):void $onBlob
+     * @param ?float $timeout per-call timeout in seconds; null = configured default
+     */
+    public function sendStream(string $path, callable $onBlob, ?float $timeout = null): void;
 }

@@ -16,11 +16,17 @@ use Erikwang2013\Etcd\Exception\ConnectionException;
 use Erikwang2013\Etcd\Exception\AuthException;
 use Erikwang2013\Etcd\Exception\EtcdException;
 use Erikwang2013\Etcd\Support\KeyValue;
+use Erikwang2013\Etcd\Support\WatchHandle;
 use Psr\Http\Client\ClientExceptionInterface;
 use Psr\Http\Client\ClientInterface;
 use Psr\Http\Client\NetworkExceptionInterface;
 use Psr\Http\Message\RequestFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
+
+/** Internal signal: the watch loop was asked to stop via its handle. */
+class WatchCanceled extends \RuntimeException
+{
+}
 
 class HttpTransport implements TransportInterface
 {
@@ -104,6 +110,16 @@ class HttpTransport implements TransportInterface
      */
     /** Read timeout for the stream watch driver; it is the event latency there. */
     private const STREAM_READ_TIMEOUT_US = 200000;
+
+    /**
+     * How long a watch keeps retrying while no endpoint answers.
+     *
+     * A count-based budget is useless here: a refused connection fails
+     * instantly, so five attempts with capped backoff gave up after ~3 s —
+     * shorter than a leader election, let alone a rolling restart, while the
+     * docs promise automatic reconnection.
+     */
+    private const WATCH_OUTAGE_TOLERANCE_SECONDS = 120.0;
 
     private const IDEMPOTENT = [
         '/v3/kv/range'          => true,
@@ -305,7 +321,7 @@ class HttpTransport implements TransportInterface
 
         $lastRevision = $startRevision;
         $backoffMs = 100;
-        $failures = 0;
+        $giveUpAt = null;
 
         while (true) {
             $url = $this->endpointUrl('/v3/watch', $this->pickEndpoint());
@@ -313,21 +329,31 @@ class HttpTransport implements TransportInterface
             $auth = $this->authHeader();
             $deliveredBefore = $lastRevision;
 
+            if (self::isCanceled($options)) {
+                return;
+            }
+
             try {
                 if ($this->driver() === self::DRIVER_CURL) {
                     $this->watchCurl($url, $payload, $auth, $onEvent, $options, $lastRevision);
                 } else {
                     $this->watchStream($url, $payload, $auth, $onEvent, $options, $lastRevision);
                 }
-                $failures = 0;
+                $giveUpAt = null;   // connected: the outage window resets
+            } catch (WatchCanceled) {
+                return;     // a handle-driven stop is a normal return
+            } catch (ConnectionException $e) {
+                // Must be caught before EtcdException: ConnectionException
+                // extends it, so the general arm below would swallow this one
+                // and silently turn the reconnect loop into "throw and stop".
+                $giveUpAt ??= microtime(true) + self::WATCH_OUTAGE_TOLERANCE_SECONDS;
+                if (microtime(true) >= $giveUpAt) {
+                    throw $e;
+                }
             } catch (AuthException | EtcdException $e) {
                 // Auth failures, cancellations and compactions will not fix
                 // themselves; a connection failure might.
                 throw $e;
-            } catch (ConnectionException $e) {
-                if (++$failures > 5) {
-                    throw $e;
-                }
             }
 
             // start_revision is inclusive, so resuming at the last revision we
@@ -385,6 +411,17 @@ class HttpTransport implements TransportInterface
                     return 0;   // short write aborts the transfer
                 }
                 return strlen($chunk);
+            },
+            // Without this the write callback only runs when data arrives, so a
+            // quiet key could never be cancelled: curl_exec() just sits there.
+            // The progress callback fires on a timer during the transfer and a
+            // non-zero return aborts it.
+            CURLOPT_NOPROGRESS       => false,
+            CURLOPT_XFERINFOFUNCTION => function ($handle, $dlTotal, $dlNow, $ulTotal, $ulNow) use ($options, &$pending): int {
+                if ($pending === null && self::isCanceled($options)) {
+                    $pending = new WatchCanceled('watch canceled by handle');
+                }
+                return $pending === null ? 0 : 1;
             },
         ]);
         $this->applyCurlTlsOptions($ch);
@@ -468,7 +505,13 @@ class HttpTransport implements TransportInterface
                     if (feof($stream)) {
                         break;      // server closed the stream → reconnect
                     }
-                    continue;       // idle tick: nothing arrived within the timeout
+                    // Idle tick: nothing arrived within the timeout. Check the
+                    // cancel flag here too — a shutdown must not wait for the
+                    // next event on a quiet key.
+                    if (self::isCanceled($options)) {
+                        throw new WatchCanceled('watch canceled by handle');
+                    }
+                    continue;
                 }
                 $buffer .= $chunk;
                 $this->consumeLines($buffer, $options, $onEvent, $lastRevision);
@@ -527,6 +570,19 @@ class HttpTransport implements TransportInterface
         if ($events !== [] || !empty($options['progressNotify'])) {
             $onEvent($events);
         }
+
+        // Checked after every frame so a cancel takes effect within one event.
+        if (self::isCanceled($options)) {
+            throw new WatchCanceled('watch canceled by handle');
+        }
+    }
+
+    /** @param array<string, mixed> $options */
+    private static function isCanceled(array $options): bool
+    {
+        $handle = $options['handle'] ?? null;
+
+        return $handle instanceof WatchHandle && $handle->isCanceled();
     }
 
     /**
@@ -557,6 +613,113 @@ class HttpTransport implements TransportInterface
         }
         $encoded = json_encode($error);
         return $encoded !== false ? $encoded : var_export($error, true);
+    }
+
+    /**
+     * Stream a byte-stream RPC, handing each decoded blob to $onBlob as it
+     * arrives. Works on the same driver chain as everything else; the PSR-18
+     * branch cannot stream and falls back to decoding the buffered body.
+     */
+    public function sendStream(string $path, callable $onBlob, ?float $timeout = null): void
+    {
+        $url = $this->endpointUrl($path, $this->pickEndpoint());
+        $auth = $this->authHeader();
+        $buffer = '';
+
+        if ($this->httpClient === null && $this->driver() === self::DRIVER_CURL) {
+            $headers = ['Content-Type: application/json'];
+            if ($auth !== '') {
+                $headers[] = $auth;
+            }
+            $ch = curl_init();
+            $pending = null;
+            curl_setopt_array($ch, [
+                CURLOPT_URL            => $url,
+                CURLOPT_POST           => true,
+                CURLOPT_POSTFIELDS     => '{}',
+                CURLOPT_HTTPHEADER     => $headers,
+                CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => (float) ($this->config['timeout'] ?? 5.0),
+                CURLOPT_TIMEOUT_MS     => max(1, (int) round(($timeout ?? (float) ($this->config['timeout'] ?? 5.0)) * 1000)),
+                CURLOPT_BUFFERSIZE     => 65536,
+                CURLOPT_WRITEFUNCTION  => function ($handle, string $chunk) use (&$buffer, &$pending, $onBlob): int {
+                    if ($pending !== null) {
+                        return 0;
+                    }
+                    $buffer .= $chunk;
+                    try {
+                        self::drainBlobs($buffer, $onBlob);
+                    } catch (\Throwable $e) {
+                        $pending = $e;
+                        return 0;
+                    }
+                    return strlen($chunk);
+                },
+            ]);
+            $this->applyCurlTlsOptions($ch);
+            try {
+                $result = curl_exec($ch);
+                if ($pending !== null) {
+                    throw $pending;
+                }
+                if ($result === false) {
+                    throw new ConnectionException('stream failed: ' . curl_error($ch), retryable: true);
+                }
+                $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+                if ($status !== 200) {
+                    $this->throwForStatus($status, (string) $result, $path, false);
+                }
+            } finally {
+                curl_close($ch);
+            }
+            return;
+        }
+
+        // stream driver (and the buffered PSR-18 fallback): same parser, one body.
+        [$status, $body] = $this->httpRequest($url, '{}', $path, $timeout);
+        if ($status !== 200) {
+            $this->throwForStatus($status, $body, $path, false);
+        }
+        $buffer = $body;
+        self::drainBlobs($buffer, $onBlob, true);
+    }
+
+    /**
+     * Pull complete {"result":{"blob":…}} frames out of $buffer and hand each
+     * decoded blob over. Incomplete trailing data stays in the buffer.
+     *
+     * @param callable(string):void $onBlob
+     */
+    private static function drainBlobs(string &$buffer, callable $onBlob, bool $flush = false): void
+    {
+        while (($pos = strpos($buffer, "\n")) !== false) {
+            $line = trim(substr($buffer, 0, $pos));
+            $buffer = substr($buffer, $pos + 1);
+            if ($line !== '') {
+                self::emitBlob($line, $onBlob);
+            }
+        }
+        if ($flush && trim($buffer) !== '') {
+            self::emitBlob(trim($buffer), $onBlob);
+            $buffer = '';
+        }
+    }
+
+    private static function emitBlob(string $line, callable $onBlob): void
+    {
+        $frame = json_decode($line, true);
+        if (!is_array($frame) || !isset($frame['result'])) {
+            throw new EtcdException('Expected a stream frame, got: ' . substr($line, 0, 120));
+        }
+        $blob = $frame['result']['blob'] ?? null;
+        if ($blob === null) {
+            return;     // header-only frame
+        }
+        $decoded = base64_decode((string) $blob, true);
+        if ($decoded === false) {
+            throw new EtcdException('Snapshot frame blob is not valid base64.');
+        }
+        $onBlob($decoded);
     }
 
     /**

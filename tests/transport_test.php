@@ -24,6 +24,7 @@ require_once __DIR__ . '/Support/FakeGateway.php';
 use Erikwang2013\Etcd\EtcdClient;
 use Erikwang2013\Etcd\Exception\ConnectionException;
 use Erikwang2013\Etcd\Exception\EtcdException;
+use Erikwang2013\Etcd\Support\WatchHandle;
 use Erikwang2013\Etcd\Tests\Support\Cases;
 use Erikwang2013\Etcd\Tests\Support\FakeGateway;
 use Erikwang2013\Etcd\Transport\HttpTransport;
@@ -156,6 +157,41 @@ Cases::run('watch: prev_kv comes through when the caller asks for it', function 
     assert(($events[2]['prev_kv']['value'] ?? null) === 'v2', 'delete prev_kv wrong: ' . json_encode($events[2]['prev_kv'] ?? null));
 });
 
+Cases::run('watch: cancelling the handle stops delivery and returns without an exception', function () use ($transport) {
+    $handle = new WatchHandle();
+    $events = [];
+    $started = microtime(true);
+
+    // The fixture sends created + 3 events and then ends the stream, and the
+    // transport reconnects — so with a dropped handle this never returns. The
+    // count guard turns that hang into an ordinary failure.
+    $transport->watch('k', '', 0, function (array $batch) use (&$events, $handle) {
+        $events = array_merge($events, $batch);
+        $handle->cancel();
+        if (count($events) > 1) {
+            throw new \RuntimeException('delivered ' . count($events) . ' events after cancel()');
+        }
+    }, ['handle' => $handle]);
+
+    $elapsed = microtime(true) - $started;
+    assert($handle->isCanceled(), 'the callback should have canceled the handle');
+    assert(count($events) === 1, 'cancel() must stop delivery: got ' . count($events) . ' events');
+    assert($elapsed < 1.0, sprintf('watch took %.3fs to return after cancel()', $elapsed));
+});
+
+Cases::run('watch: a handle already canceled never reaches the network', function () {
+    // The reconnect loop checks the flag before each connect attempt, so a
+    // shutdown that cancels while etcd is unreachable returns instead of
+    // spending five connection attempts (and their backoff) finding out.
+    $handle = new WatchHandle();
+    $handle->cancel();
+    $dead = new HttpTransport(['127.0.0.1:1'], ['scheme' => 'http', 'timeout' => 5.0, 'retry' => 0]);
+
+    $started = microtime(true);
+    $dead->watch('k', '', 0, static function (): void {}, ['handle' => $handle]);
+    assert(microtime(true) - $started < 0.5, 'a pre-canceled watch still tried to connect');
+});
+
 // ---------------------------------------------------------------------------
 // unary RPCs
 // ---------------------------------------------------------------------------
@@ -276,6 +312,44 @@ Cases::run('snapshot: the stream driver returns the same bytes', function () use
 Cases::run('snapshot: collection over the stream driver behaves like the curl driver', function () use ($streamTransport) {
     $range = $streamTransport->send('/v3/kv/range', ['key' => base64_encode('a')]);
     assert(($range['kvs'][0]['key'] ?? null) === base64_encode('a'), 'stream send() decode failed: ' . json_encode($range));
+});
+
+// snapshotTo — the streaming-to-disk half, over a real HTTP stream
+$snapDir = sys_get_temp_dir() . '/etcd-snapshot-to-' . bin2hex(random_bytes(6));
+mkdir($snapDir, 0700);
+$snapEntries = static fn(): array => array_values(array_diff(scandir($snapDir), ['.', '..']));
+
+Cases::run('snapshotTo: streams the frames to disk and publishes only a complete file', function () use ($client, $transport, $snapDir, $snapEntries) {
+    $path = $snapDir . '/snap.db';
+    $bytes = $client->maintenance()->snapshotTo($path);
+
+    // The streamed write must produce the bytes the official tool restores.
+    $raw = $transport->sendRaw('/v3/maintenance/snapshot');
+    assert(file_get_contents($path) === $raw, 'snapshotTo wrote different bytes than sendRaw');
+    assert(substr($raw, -32) === hash('sha256', substr($raw, 0, -32), true), 'the trailer no longer matches the payload');
+    assert($bytes === strlen($raw) && filesize($path) === $bytes, "returned {$bytes} for a " . filesize($path) . '-byte file');
+    assert($snapEntries() === ['snap.db'], 'a temp file was left behind: ' . json_encode($snapEntries()));
+    unlink($path);
+});
+
+Cases::run('snapshotTo: a stream that fails leaves the previous backup untouched', function () use ($snapDir, $snapEntries) {
+    $path = $snapDir . '/kept.db';
+    file_put_contents($path, 'yesterdays-good-backup');
+    // A closed port fails the connection, not the stream: the same cleanup path
+    // must also hold for a stream cut off mid-database.
+    $dead = new EtcdClient(['endpoints' => ['127.0.0.1:1'], 'scheme' => 'http', 'timeout' => 2.0, 'retry' => 0]);
+
+    try {
+        $dead->maintenance()->snapshotTo($path);
+        assert(false, 'a snapshot against a dead endpoint should throw');
+    } catch (ConnectionException) {
+        // expected
+    }
+
+    assert(file_get_contents($path) === 'yesterdays-good-backup', 'the previous backup was damaged');
+    assert($snapEntries() === ['kept.db'], 'a temp file was left behind: ' . json_encode($snapEntries()));
+    unlink($path);
+    rmdir($snapDir);
 });
 
 // ---------------------------------------------------------------------------

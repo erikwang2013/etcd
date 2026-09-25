@@ -6,6 +6,7 @@ namespace Erikwang2013\Etcd\Tests\Unit\Maintenance;
 
 use Erikwang2013\Etcd\Maintenance\MaintenanceClient;
 use Erikwang2013\Etcd\Tests\Support\FakeTransport;
+use Erikwang2013\Etcd\Exception\ConnectionException;
 use Erikwang2013\Etcd\Exception\EtcdException;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
@@ -14,6 +15,58 @@ class MaintenanceClientTest extends TestCase
 {
     /** Measured on etcd 3.5.17: larger than PHP_INT_MAX, so an (int) cast saturates it. */
     private const MEMBER_ID = '10276657743932975437';
+
+    private ?string $dir = null;
+
+    protected function tearDown(): void
+    {
+        if ($this->dir === null) {
+            return;
+        }
+        foreach (scandir($this->dir) ?: [] as $entry) {
+            if ($entry !== '.' && $entry !== '..') {
+                unlink($this->dir . '/' . $entry);
+            }
+        }
+        rmdir($this->dir);
+        $this->dir = null;
+    }
+
+    /** A directory that is emptied after each test, so leftovers are visible. */
+    private function destinationDir(): string
+    {
+        $this->dir ??= sys_get_temp_dir() . '/etcd-snapshot-to-' . bin2hex(random_bytes(6));
+        if (!is_dir($this->dir)) {
+            mkdir($this->dir, 0700);
+        }
+
+        return $this->dir;
+    }
+
+    private function destination(): string
+    {
+        return $this->destinationDir() . '/snap.db';
+    }
+
+    /** Every entry in the destination directory, hidden temp files included. */
+    private function dirEntries(): array
+    {
+        return array_values(array_diff(scandir($this->destinationDir()) ?: [], ['.', '..']));
+    }
+
+    /**
+     * Frames a database body the way the snapshot RPC streams it: the bytes, then
+     * the sha256 of everything before them. Measured against etcd 3.5.17 — PHP's
+     * own hash() of the body equals the stream's last 32 bytes.
+     *
+     * @return list<string>
+     */
+    private static function snapshotStream(string $body, int $frameSize = 0): array
+    {
+        $stream = $body . hash('sha256', $body, true);
+
+        return $frameSize > 0 ? str_split($stream, $frameSize) : [$stream];
+    }
 
     #[Test]
     public function statusSendsToStatusPath(): void
@@ -246,6 +299,9 @@ class MaintenanceClientTest extends TestCase
                 return parent::sendRaw($path);
             }
         };
+        // snapshot() verifies the sha256 trailer, so the stub body must carry one
+        $payload = str_repeat("db", 64);
+        $transport->rawResponse = $payload . hash('sha256', $payload, true);
         $client = new MaintenanceClient($transport);
 
         // a snapshot/defrag of a real database outlives the default timeout
@@ -263,7 +319,10 @@ class MaintenanceClientTest extends TestCase
     }
 
     #[Test]
-    public function hashIncludesRevisionOnlyWhenPositive(): void
+    // HashRequest declares no revision field (that belongs to HashKVRequest), so
+    // the parameter is accepted for compatibility and never put on the wire: the
+    // HTTP gateway would ignore it, and a typed message would reject it.
+    public function hashNeverSendsTheUndeclaredRevisionField(): void
     {
         $transport = new FakeTransport();
         $transport->addResponse(['hash' => 42]);
@@ -274,7 +333,7 @@ class MaintenanceClientTest extends TestCase
         $client->hash(7);
 
         $this->assertSame(['/v3/maintenance/hash', []], $transport->sent[0]);
-        $this->assertSame(['/v3/maintenance/hash', ['revision' => 7]], $transport->sent[1]);
+        $this->assertSame(['/v3/maintenance/hash', []], $transport->sent[1]);
     }
 
     #[Test]
@@ -306,13 +365,184 @@ class MaintenanceClientTest extends TestCase
     public function snapshotUsesSendRawAndReturnsRawString(): void
     {
         $transport = new FakeTransport();
-        $transport->rawResponse = "raw-binary-data\x00\x01";
+        // a real snapshot ends with sha256(the payload before it) — snapshot()
+        // verifies that trailer, so the fixture has to look like the real thing
+        $payload = "raw-binary-data\x00\x01";
+        $transport->rawResponse = $payload . hash('sha256', $payload, true);
         $client = new MaintenanceClient($transport);
 
         $result = $client->snapshot();
 
         $this->assertSame(['/v3/maintenance/snapshot', []], $transport->sent[0]);
-        $this->assertSame("raw-binary-data\x00\x01", $result);
+        $this->assertSame($payload . hash('sha256', $payload, true), $result);
+    }
+
+    #[Test]
+    public function snapshotToWritesEveryBlobAndReturnsTheFileSize(): void
+    {
+        $path = $this->destination();
+        $transport = new FakeTransport();
+        // Frames small enough that the trailer straddles blobs, as it does on the wire.
+        $transport->streamBlobs = self::snapshotStream('bbolt-database-bytes', 7);
+        $client = new MaintenanceClient($transport);
+
+        $bytes = $client->snapshotTo($path);
+
+        $all = implode('', $transport->streamBlobs);
+        $this->assertSame(['/v3/maintenance/snapshot', []], $transport->sent[0]);
+        $this->assertSame($all, file_get_contents($path));
+        $this->assertSame(strlen($all), $bytes);
+        $this->assertSame(filesize($path), $bytes);
+    }
+
+    #[Test]
+    public function snapshotToWritesEachBlobAsItArrivesAndPublishesTheFileOnlyAtTheEnd(): void
+    {
+        $path = $this->destination();
+        $transport = new class($path) extends FakeTransport {
+            /** @var list<array{published: bool, tempBytes: int}> */
+            public array $during = [];
+
+            public function __construct(private string $dest)
+            {
+            }
+
+            public function sendStream(string $path, callable $onBlob, ?float $timeout = null): void
+            {
+                $dir = \dirname($this->dest);
+                foreach ($this->streamBlobs as $blob) {
+                    $onBlob($blob);
+                    $others = array_values(array_diff(scandir($dir) ?: [], ['.', '..', basename($this->dest)]));
+                    $temp = $others === [] ? '' : $dir . '/' . $others[0];
+                    clearstatcache();       // filesize() would replay its stat cache
+                    $this->during[] = [
+                        'published' => file_exists($this->dest),
+                        'tempBytes' => $temp === '' ? 0 : (int) filesize($temp),
+                    ];
+                }
+            }
+        };
+        $transport->streamBlobs = self::snapshotStream(str_repeat('x', 300), 100);
+        $client = new MaintenanceClient($transport);
+
+        $client->snapshotTo($path);
+
+        // Nothing was held back in memory: after frame N only N frames were on
+        // disk, and the destination only appears once the stream has ended.
+        $this->assertSame([100, 200, 300, 332], array_column($transport->during, 'tempBytes'));
+        $this->assertSame([false, false, false, false], array_column($transport->during, 'published'));
+        $this->assertSame([basename($path)], $this->dirEntries());
+    }
+
+    #[Test]
+    public function snapshotToLeavesNoBackupWhenTheStreamFails(): void
+    {
+        $path = $this->destination();
+        $transport = new class extends FakeTransport {
+            public function sendStream(string $path, callable $onBlob, ?float $timeout = null): void
+            {
+                $onBlob('half-a-database');
+                throw new ConnectionException('stream failed: transfer closed with outstanding read data remaining');
+            }
+        };
+        $client = new MaintenanceClient($transport);
+
+        try {
+            $client->snapshotTo($path);
+            $this->fail('a failed snapshot must not return');
+        } catch (ConnectionException $e) {
+            $this->assertStringContainsString('outstanding read data', $e->getMessage());
+        }
+
+        // Not $path, and not a .temp file either: nothing a backup job could pick up.
+        $this->assertSame([], $this->dirEntries());
+    }
+
+    #[Test]
+    public function snapshotToKeepsThePreviousBackupWhenTheStreamFails(): void
+    {
+        $path = $this->destination();
+        file_put_contents($path, 'yesterdays-good-backup');
+        $transport = new class extends FakeTransport {
+            public function sendStream(string $path, callable $onBlob, ?float $timeout = null): void
+            {
+                $onBlob('partial');
+                throw new EtcdException('timed out');
+            }
+        };
+        $client = new MaintenanceClient($transport);
+
+        try {
+            $client->snapshotTo($path);
+            $this->fail('a failed snapshot must not return');
+        } catch (EtcdException) {
+            // expected
+        }
+
+        $this->assertSame('yesterdays-good-backup', file_get_contents($path));
+        $this->assertSame([basename($path)], $this->dirEntries());
+    }
+
+    #[Test]
+    public function snapshotToRefusesAStreamThatEndsWithoutAValidTrailer(): void
+    {
+        $path = $this->destination();
+        $transport = new FakeTransport();
+        // A stream cut at a frame boundary and closed cleanly: no transport error
+        // to report, and the last 32 bytes are database content, not a hash.
+        $transport->streamBlobs = self::snapshotStream(str_repeat('y', 200), 64);
+        $transport->streamBlobs = array_slice($transport->streamBlobs, 0, 2);
+        $client = new MaintenanceClient($transport);
+
+        $this->expectException(EtcdException::class);
+        $this->expectExceptionMessage('without a valid hash trailer');
+
+        try {
+            $client->snapshotTo($path);
+        } finally {
+            $this->assertSame([], $this->dirEntries());
+        }
+    }
+
+    #[Test]
+    public function snapshotToReplacesAnExistingBackup(): void
+    {
+        $path = $this->destination();
+        file_put_contents($path, 'old');
+        $transport = new FakeTransport();
+        $transport->streamBlobs = self::snapshotStream('new-database');
+        $client = new MaintenanceClient($transport);
+
+        $client->snapshotTo($path);
+
+        $this->assertSame(implode('', $transport->streamBlobs), file_get_contents($path));
+        $this->assertSame([basename($path)], $this->dirEntries());
+    }
+
+    #[Test]
+    public function snapshotToDefaultsToTheSameTimeoutsAsSnapshot(): void
+    {
+        $transport = new FakeTransport();
+        $transport->streamBlobs = self::snapshotStream('db');
+        $client = new MaintenanceClient($transport);
+
+        $client->snapshotTo($this->destination());
+        $client->snapshotTo($this->destination(), 900.0);
+
+        $this->assertSame([300.0, 900.0], $transport->timeouts);
+    }
+
+    #[Test]
+    public function snapshotToRefusesADestinationDirectoryThatIsNotThere(): void
+    {
+        $transport = new FakeTransport();
+        $transport->streamBlobs = self::snapshotStream('db');
+        $client = new MaintenanceClient($transport);
+
+        $this->expectException(EtcdException::class);
+        $this->expectExceptionMessage('destination directory is missing or not writable');
+
+        $client->snapshotTo($this->destinationDir() . '/nope/snap.db');
     }
 
     #[Test]

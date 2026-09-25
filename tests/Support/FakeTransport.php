@@ -19,6 +19,9 @@ class FakeTransport implements TransportInterface
 
     public string $rawResponse = '';
 
+    /** @var list<string> blobs replayed by sendStream() */
+    public array $streamBlobs = [];
+
     /** @var list<list<array>> */
     public array $watchEventBatches = [];
 
@@ -45,6 +48,18 @@ class FakeTransport implements TransportInterface
             throw $this->sendException;
         }
         return array_shift($this->responses) ?? [];
+    }
+
+    public function sendStream(string $path, callable $onBlob, ?float $timeout = null): void
+    {
+        $this->sent[] = [$path, []];
+        $this->timeouts[] = $timeout;
+        if ($this->rawException !== null) {
+            throw $this->rawException;
+        }
+        foreach ($this->streamBlobs as $blob) {
+            $onBlob($blob);
+        }
     }
 
     public function sendRaw(string $path, ?float $timeout = null): string

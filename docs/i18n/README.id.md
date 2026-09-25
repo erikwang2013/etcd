@@ -25,7 +25,7 @@
   penjaga konfigurasi dan lease Anda: putus, ia menyambung sendiri; kedaluwarsa, ia membersihkan sendiri.
 </p>
 
-Klien etcd v3 untuk PHP —— transport ganda gRPC + HTTP, mencakup seluruh API etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance), siap pakai dengan **Laravel / Hyperf / ThinkPHP / Webman**.
+Klien etcd v3 untuk PHP —— transport dua mode (HTTP fitur penuh / gRPC RPC unary), mencakup seluruh API etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock), siap pakai dengan **Laravel / Hyperf / ThinkPHP / Webman**.
 
 ## Persyaratan
 
@@ -221,6 +221,20 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
+**Menghentikan watch:** `watch()` memblokir terus-menerus; berikan sebuah `WatchHandle` dan ia bisa dihentikan dari luar (kebutuhan lazim proses berjalan lama yang berhenti karena SIGTERM):
+
+```php
+use Erikwang2013\Etcd\Support\WatchHandle;
+
+$handle = new WatchHandle();
+pcntl_async_signals(true);
+pcntl_signal(SIGTERM, fn() => $handle->cancel());
+
+$etcd->watch()->watchPrefix('/config/', $onEvent, ['handle' => $handle]);
+```
+
+Setelah `cancel()`, `watch()` **kembali normal** (tidak melempar exception, tidak ada yang perlu di-catch). Bahkan pada key yang menganggur ia keluar dalam sekitar satu detik — driver curl mengetahuinya lewat callback berkala cURL, driver stream lewat siklus menganggur dengan read timeout 200ms.
+
 **Reconnect:** saat koneksi Watch terputus, klien berlangganan ulang dari `lastRevision + 1` (`start_revision` bersifat **inklusif**, melanjutkan dengan nilai lama akan memutar ulang event terakhir). Failover tidak kehilangan event dan tidak mengirimnya dua kali.
 
 **Kebijakan retry:** hanya kegagalan yang membuktikan koneksi tidak pernah terbentuk (koneksi ditolak / DNS gagal) yang dicoba ulang, dan RPC baca-saja (range, status, memberlist, dll.) juga mentoleransi 5xx dan timeout. Operasi tulis yang terkena 5xx atau timeout baca **tidak** dicoba ulang — permintaan itu bisa jadi sudah berlaku, dan mengulangnya menerapkan CAS dua kali, atau bahkan memberi "jawaban yang salah dengan yakin" (retry melihat tulisannya sendiri yang pertama lalu melaporkan CAS gagal padahal sebenarnya menang).
@@ -308,6 +322,37 @@ $etcd->cluster()->memberPromote(789012);
 $etcd->cluster()->memberRemove(345678);
 ```
 
+### Election — pemilihan leader
+
+```php
+// pencalonan: ambil lease dulu lalu ikut serta; hanya kembali saat menang, yang kalah menunggu (dibatasi $timeout)
+$lease  = $etcd->lease()->grant(30);
+$leader = $etcd->election()->campaign('/my-election', 'node-a', $lease['ID'], 5.0);
+// → ['name' => ..., 'key' => ..., 'rev' => ..., 'lease' => ...]
+
+// leader saat ini (null bila belum ada yang menang)
+$current = $etcd->election()->leader('/my-election');
+
+// mundur
+$etcd->election()->resign($leader);
+```
+
+Di gateway HTTP, `campaign()` adalah **respons tertahan** — tidak kembali sebelum Anda menang, jadi batasi penantian dengan `$timeout`. Untuk memantau pergantian leader dalam jangka panjang, gunakan `observe()`.
+
+**Perhatian (jebakan senyap yang terukur):** `proclaim()` / `resign()` memerlukan **array deskriptor leader yang lengkap** (name, key, dan rev ketiganya ada). Kurang satu saja, etcd mengembalikan **HTTP 200 tetapi tidak melakukan apa pun** — tampak seperti berhasil dilepas, padahal leader masih ada. Karena itu kedua metode memvalidasi deskriptor sebelum mengirim dan melempar exception bila tidak lengkap; selalu pakai nilai balikan `campaign()` / `leader()`, jangan menyusun sendiri.
+
+**Perilaku terukur lainnya:** pencalonan yang gagal di tengah permintaan **ditarik kembali** oleh server (jadi timeout `acquire()` bisa melaporkan kegagalan dengan aman, tidak menjadi 'pemegang tersembunyi'); bila tidak ada yang terpilih, `leader()` mengembalikan `null` (server menjawab 500 `election: no leader`, itu keadaan normal bukan error).
+
+### Lock — lock terdistribusi
+
+```php
+$lock = $etcd->lock()->acquire('/my-lock', ttl: 30, timeout: 5.0);
+// ... bagian kritis ...
+$etcd->lock()->release($lock);
+```
+
+**Ini implementasi di sisi klien di atas Election, bukan lock di sisi server.** Gateway HTTP etcd 3.5 **tidak mengekspos** `/v3/lock/*` (terukur: 404), sehingga saling-eksklusi disediakan oleh «pencalonan Election + lease» — pendekatan yang sama dengan paket Go `concurrency` milik etcd sendiri. Bila pemegangnya di-`SIGKILL`, lock otomatis dilepas setelah lease kedaluwarsa, tanpa pembersihan manual.
+
 ### Maintenance — Operasional
 
 ```php
@@ -328,6 +373,11 @@ $hash = $etcd->maintenance()->hash();
 // ambil snapshot (mengembalikan data biner, tinggal tulis ke file)
 $snapshot = $etcd->maintenance()->snapshot();
 file_put_contents('/backup/etcd-snapshot.db', $snapshot);
+
+// untuk database besar, tulis streaming ke disk: jangan baca seluruh DB ke memori
+$bytes = $etcd->maintenance()->snapshotTo('/backup/etcd-snapshot.db');
+// menulis file sementara dulu dan baru mengganti nama setelah digest sha256
+// di 32 byte terakhir lolos, jadi penulisan yang terputus tidak meninggalkan file yang terlihat seperti backup; mengembalikan jumlah byte yang ditulis.
 ```
 
 ## Mode Transport
@@ -335,10 +385,15 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 | Mode | Status | Dependensi | Cocok untuk |
 |------|------|------|---------|
 | **HTTP** | Tersedia | ext-curl / stream / PSR-18 (salah satu) | tanpa dependensi ekstensi, langsung jalan |
-| **gRPC** | Kerangka | ext-grpc + grpc/grpc + google/protobuf | throughput tinggi, streaming native |
+| **gRPC** | RPC unary | ext-grpc + grpc/grpc + pesan protobuf hasil generate | throughput tinggi; streaming dan Election tetap perlu HTTP |
 | **auto** | Default | — | saat ini sama dengan `http` (lihat di bawah) |
 
-`auto` setara dengan `http`: `GrpcTransport` masih berupa kerangka (ketiga metodenya melempar exception), jadi ia **tidak** beralih sendiri ke gRPC — benar-benar memeriksa `ext-grpc` hanya akan membuat pengguna yang memasang ekstensi itu justru tidak bisa memakainya. Hanya `'transport' => 'grpc'` yang diminta secara eksplisit yang memilihnya. Setelah gRPC selesai, maknanya akan berubah.
+`auto` setara dengan `http`: gRPC saat ini hanya mencakup RPC unary — panggilan streaming seperti watch / snapshot, serta Election, tetap harus lewat HTTP, jadi beralih otomatis hanya akan diam-diam menghilangkan separuh fitur pengguna yang memasang ekstensinya. Hanya `'transport' => 'grpc'` yang diminta secara eksplisit yang memilihnya.
+
+**Status transport gRPC saat ini (perhatikan):**
+- **Sudah ada**: RPC unary (`send()`) — kelas pesan hasil generate `protoc` dari `rpc.proto` etcd v3.5; body request disusun sebagai pesan bertipe, dan nama serta tipe field dijamin oleh proto.
+- **Belum ada**: panggilan streaming seperti watch dan snapshot, serta `/v3/election/*` (itu proto lain, `v3electionpb`) — jalur-jalur ini **ditolak berdasarkan nama** beserta alasannya, tidak gagal diam-diam.
+- **Belum diverifikasi end-to-end**: lingkungan pengembangan proyek ini tidak punya `ext-grpc`, jadi pembukaan channel, metadata kredensial, `_simpleRequest`, timeout, dan pemetaan kode status semuanya **ditulis tangan mengikuti pola keluaran grpc_php_plugin dan belum pernah dijalankan lewat panggilan sungguhan**. Pembuatan pesan dan penyusunan request punya tes; perjalanan bolak-balik di jaringan tidak. Kalau mau memakai gRPC, verifikasi sendiri dulu sebelum ke produksi.
 
 ### Konfigurasi Manual Klien HTTP PSR-18
 
@@ -491,6 +546,7 @@ try {
 erikwang2013/etcd/
 ├── composer.json                    # definisi paket: autoload PSR-4 + auto-discovery Laravel / Hyperf
 ├── phpunit.xml.dist                 # konfigurasi PHPUnit (dua suite: unit / integration)
+├── protos/                          # proto upstream etcd v3.5 + skrip generate + keluaran hasil generate (untuk gRPC)
 ├── .github/workflows/ci.yml         # gate sebelum merge: matriks unit test / batas sintaks / integrasi / dokumen i18n
 ├── config/etcd.php                  # konfigurasi default untuk dipublikasikan tiap framework (membaca variabel environment ETCD_*)
 ├── .github/workflows/release.yml    # rilis otomatis saat tag dibuat
@@ -503,14 +559,15 @@ erikwang2013/etcd/
 │   ├── features.svg                 #   diagram fitur
 │   └── lifecycle.svg                #   diagram siklus hidup
 ├── src/
-│   ├── EtcdClient.php               # facade teratas + singleton: kv / watch / lease / auth / cluster / maintenance
+│   ├── EtcdClient.php               # facade teratas + singleton: aksesor delapan subsistem
 │   ├── Mascot.php                   # pintu masuk maskot proyek Etchy (svg / dataUri / path)
 │   ├── Install.php                  # hook plugin Webman (WEBMAN_PLUGIN)
 │   ├── Transport/                   # lapisan transport
 │   │   ├── TransportInterface.php   #   abstraksi transport: send / sendRaw / watch
 │   │   ├── TransportSelector.php    #   pemilihan otomatis auto / http / grpc
 │   │   ├── HttpTransport.php        #   transport HTTP JSON (sudah lengkap)
-│   │   └── GrpcTransport.php        #   transport gRPC (kerangka)
+│   │   ├── GrpcTransport.php        #   transport gRPC (RPC unary; streaming ditolak dengan alasan)
+│   │   └── GrpcStub.php             #   subclass Grpc\BaseStub (file terpisah, tidak dimuat bila ekstensinya tidak ada)
 │   ├── Kv/KvClient.php              # baca-tulis KV / pemindaian prefix / transaksi / kompaksi
 │   ├── Watch/WatchClient.php        # pemantauan perubahan Watch + langganan ulang saat terputus
 │   ├── Lease/LeaseClient.php        # sewa Lease grant / keepAlive / revoke
@@ -519,9 +576,11 @@ erikwang2013/etcd/
 │   │   ├── UserClient.php           #   CRUD pengguna + pengikatan peran
 │   │   └── RoleClient.php           #   CRUD peran + izin
 │   ├── Cluster/ClusterClient.php    # Cluster manajemen anggota klaster
+│   ├── Election/                    # Election — pemilihan (campaign / leader / observe / resign)
+│   ├── Lock/LockClient.php          # Lock — lock terdistribusi (di atas Election; gateway tidak punya /v3/lock/*)
 │   ├── Maintenance/                 # Maintenance operasional: status / alarm / defrag / snapshot
 │   ├── Exception/                   # hierarki exception
-│   ├── Support/KeyValue.php         # dekode bersama: pembacaan KV dan event watch mengembalikan bentuk yang sama
+│   ├── Support/                     # dekode bersama: KeyValue / Int64, handle pembatalan WatchHandle
 │   └── Adapter/                     # adapter framework
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider

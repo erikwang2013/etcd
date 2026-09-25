@@ -37,12 +37,15 @@
         "psr/http-client": "For the PSR-18 transport path via HttpTransport::setHttpClient(). Without it the client uses ext-curl, or PHP's stream wrapper when ext-curl is absent.",
         "psr/http-factory": "PSR-17 request/stream factories, used together with psr/http-client.",
         "ext-curl": "Fastest HTTP driver (default when loaded). Without it the client falls back to the stream wrapper.",
-        "grpc/grpc": "For native gRPC transport (better performance, full watch streaming)",
-        "google/protobuf": "For protobuf message support (required by gRPC transport)"
+        "ext-grpc": "Enables the gRPC transport (transport=grpc): unary RPCs over messages generated from etcd's protos. Without it that transport throws a ConnectionException on first use and the default HTTP transport is used instead.",
+        "ext-protobuf": "Runtime for the generated protobuf messages the gRPC transport sends. google/protobuf ships the same classes if the extension cannot be installed.",
+        "google/protobuf": "Same runtime as ext-protobuf, in pure PHP; install one of the two to use transport=grpc.",
+        "grpc/grpc": "Provides the Grpc\\BaseStub and Grpc\\Channel classes the gRPC transport extends; install it together with ext-grpc."
     },
     "autoload": {
         "psr-4": {
-            "Erikwang2013\\Etcd\\": "src/"
+            "Erikwang2013\\Etcd\\": "src/",
+            "Erikwang2013\\Etcd\\Proto\\": "protos/generated/Erikwang2013/Etcd/Proto/"
         }
     },
     "autoload-dev": {

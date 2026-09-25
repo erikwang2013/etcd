@@ -6,9 +6,11 @@ namespace Erikwang2013\Etcd\Tests\Unit;
 
 use Erikwang2013\Etcd\Auth\AuthClient;
 use Erikwang2013\Etcd\Cluster\ClusterClient;
+use Erikwang2013\Etcd\Election\ElectionClient;
 use Erikwang2013\Etcd\EtcdClient;
 use Erikwang2013\Etcd\Kv\KvClient;
 use Erikwang2013\Etcd\Lease\LeaseClient;
+use Erikwang2013\Etcd\Lock\LockClient;
 use Erikwang2013\Etcd\Maintenance\MaintenanceClient;
 use Erikwang2013\Etcd\Transport\HttpTransport;
 use Erikwang2013\Etcd\Transport\TransportInterface;
@@ -99,12 +101,16 @@ class EtcdClientTest extends TestCase
         self::assertInstanceOf(AuthClient::class, $client->auth());
         self::assertInstanceOf(ClusterClient::class, $client->cluster());
         self::assertInstanceOf(MaintenanceClient::class, $client->maintenance());
+        self::assertInstanceOf(ElectionClient::class, $client->election());
+        self::assertInstanceOf(LockClient::class, $client->lock());
         self::assertSame($client->kv(), $client->kv());
         self::assertSame($client->watch(), $client->watch());
         self::assertSame($client->lease(), $client->lease());
         self::assertSame($client->auth(), $client->auth());
         self::assertSame($client->cluster(), $client->cluster());
         self::assertSame($client->maintenance(), $client->maintenance());
+        self::assertSame($client->election(), $client->election());
+        self::assertSame($client->lock(), $client->lock());
     }
 
     public function testTransportReturnsTransportInterface(): void

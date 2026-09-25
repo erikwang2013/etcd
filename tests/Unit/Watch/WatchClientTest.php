@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Erikwang2013\Etcd\Tests\Unit\Watch;
 
+use Erikwang2013\Etcd\Support\WatchHandle;
 use Erikwang2013\Etcd\Watch\WatchClient;
 use Erikwang2013\Etcd\Tests\Support\FakeTransport;
 use PHPUnit\Framework\Attributes\Test;
@@ -67,6 +68,69 @@ class WatchClientTest extends TestCase
 
         $this->assertSame([], $transport->watchCalls[0][3]);
         $this->assertSame(['progressNotify' => true], $transport->watchCalls[1][3]);
+    }
+
+    #[Test]
+    public function watchForwardsTheHandleToTheTransport(): void
+    {
+        $transport = new FakeTransport();
+        $client = new WatchClient($transport);
+        $handle = new WatchHandle();
+
+        $client->watch('foo', function (array $events): void {}, ['handle' => $handle]);
+
+        $this->assertSame(['handle' => $handle], $transport->watchCalls[0][3]);
+    }
+
+    #[Test]
+    public function watchPrefixForwardsTheHandleToTheTransport(): void
+    {
+        $transport = new FakeTransport();
+        $client = new WatchClient($transport);
+        $handle = new WatchHandle();
+
+        $client->watchPrefix('foo/', function (array $events): void {}, ['handle' => $handle]);
+
+        $this->assertSame(['handle' => $handle], $transport->watchCalls[0][3]);
+    }
+
+    #[Test]
+    public function watchWithoutAHandleSendsNoHandleOption(): void
+    {
+        $transport = new FakeTransport();
+        $client = new WatchClient($transport);
+
+        $client->watch('foo', function (array $events): void {});
+        $client->watch('bar', function (array $events): void {}, ['handle' => null]);
+
+        $this->assertSame([], $transport->watchCalls[0][3]);
+        $this->assertSame([], $transport->watchCalls[1][3]);
+    }
+
+    #[Test]
+    public function watchRejectsAValueThatIsNotAWatchHandle(): void
+    {
+        $transport = new FakeTransport();
+        $client = new WatchClient($transport);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage("Watch option 'handle' must be an instance of");
+
+        // A truthy non-handle is exactly the input that would look accepted and
+        // then never stop the watch.
+        $client->watch('foo', function (array $events): void {}, ['handle' => true]);
+    }
+
+    #[Test]
+    public function watchRejectsAnUnknownOption(): void
+    {
+        $transport = new FakeTransport();
+        $client = new WatchClient($transport);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage("Unknown watch option 'prevkv'");
+
+        $client->watch('foo', function (array $events): void {}, ['prevkv' => true]);
     }
 
     #[Test]

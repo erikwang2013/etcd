@@ -21,6 +21,8 @@ use think\Facade as BaseFacade;
  * @method static \Erikwang2013\Etcd\Auth\AuthClient auth()
  * @method static \Erikwang2013\Etcd\Cluster\ClusterClient cluster()
  * @method static \Erikwang2013\Etcd\Maintenance\MaintenanceClient maintenance()
+ * @method static \Erikwang2013\Etcd\Election\ElectionClient election()
+ * @method static \Erikwang2013\Etcd\Lock\LockClient lock()
  */
 class Facade extends BaseFacade
 {

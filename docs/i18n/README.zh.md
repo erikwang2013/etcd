@@ -42,7 +42,7 @@
   守着你的配置和租约：掉线自己重连，过期自己清理。
 </p>
 
-PHP etcd v3 客户端 —— gRPC + HTTP 双模传输，覆盖 etcd v3 全部 API（KV / Watch / Lease / Auth / Cluster / Maintenance），开箱适配 **Laravel / Hyperf / ThinkPHP / Webman**。
+PHP etcd v3 客户端 —— 双模传输（HTTP 全功能 / gRPC 一元 RPC），覆盖 etcd v3 全部 API（KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock），开箱适配 **Laravel / Hyperf / ThinkPHP / Webman**。
 
 ## 要求
 
@@ -238,6 +238,20 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
+**停止监听：** `watch()` 会一直阻塞，给它一个 `WatchHandle` 就能从外部停（长驻进程按 SIGTERM 收尾的常规需求）：
+
+```php
+use Erikwang2013\Etcd\Support\WatchHandle;
+
+$handle = new WatchHandle();
+pcntl_async_signals(true);
+pcntl_signal(SIGTERM, fn() => $handle->cancel());
+
+$etcd->watch()->watchPrefix('/config/', $onEvent, ['handle' => $handle]);
+```
+
+`cancel()` 之后 `watch()` **正常返回**（不抛异常，不需要 catch）。空闲的 key 上也会在一秒内退出——curl 驱动靠 cURL 的周期回调发现，stream 驱动靠 200ms 的读超时空闲周期。
+
 **断线重连：** Watch 连接断开时自动从 `lastRevision + 1` 续订（`start_revision` 是**闭区间**语义，
 用原值续订会重放最后一个事件）。故障转移不丢事件，也不重复投递。
 
@@ -331,6 +345,37 @@ $etcd->cluster()->memberPromote(789012);
 $etcd->cluster()->memberRemove(345678);
 ```
 
+### Election — leader 选举
+
+```php
+// 竞选：拿到租约后参选；当选才返回，输着的人会等（用 $timeout 兜底）
+$lease  = $etcd->lease()->grant(30);
+$leader = $etcd->election()->campaign('/my-election', 'node-a', $lease['ID'], 5.0);
+// → ['name' => ..., 'key' => ..., 'rev' => ..., 'lease' => ...]
+
+// 当前 leader（无人当选返回 null）
+$current = $etcd->election()->leader('/my-election');
+
+// 让位
+$etcd->election()->resign($leader);
+```
+
+`campaign()` 在 HTTP 网关上是一个**缓冲响应**——当选之前不返回，所以用 `$timeout` 约束等待。需要长期跟踪 leader 变化用 `observe()`。
+
+**注意（实测的静默陷阱）：** `proclaim()` / `resign()` 需要**完整的 leader 描述数组**（name、key、rev 三者齐全）。少任何一个，etcd 会返回 **HTTP 200 却什么都不做**——看起来"释放成功"，leader 其实还在。所以这两个方法会在发送前校验描述符，不完整直接抛异常；请一律使用 `campaign()` / `leader()` 的返回值，不要自己拼。
+
+**其它实测行为：** 请求中途失败的竞选会被服务端**撤回**（所以 `acquire()` 超时可以安全地报告失败，不会变成"隐藏的持有者"）；无人当选时 `leader()` 返回 `null`（服务端回 500 `election: no leader`，属正常状态而非错误）。
+
+### Lock — 分布式锁
+
+```php
+$lock = $etcd->lock()->acquire('/my-lock', ttl: 30, timeout: 5.0);
+// ... 临界区 ...
+$etcd->lock()->release($lock);
+```
+
+**这是建在 Election 之上的客户端实现，不是服务端锁。** etcd 3.5 的 HTTP 网关**不暴露** `/v3/lock/*`（实测 404），所以互斥由「Election 竞选 + 租约」提供——与 etcd 自家 Go 的 `concurrency` 包同一做法。持有者被 `SIGKILL` 时，租约到期后锁自动释放，无需人工清理。
+
 ### Maintenance — 运维
 
 ```php
@@ -351,6 +396,11 @@ $hash = $etcd->maintenance()->hash();
 // 获取快照（返回二进制数据，写入文件即可）
 $snapshot = $etcd->maintenance()->snapshot();
 file_put_contents('/backup/etcd-snapshot.db', $snapshot);
+
+// 大库请用流式落盘：不把整个数据库读进内存
+$bytes = $etcd->maintenance()->snapshotTo('/backup/etcd-snapshot.db');
+// 先写临时文件、校验末尾 32 字节的 sha256 摘要通过后才改名，
+// 所以中断不会留下一个"看着像备份"的残file；返回写入字节数。
 ```
 
 ## 传输模式
@@ -358,10 +408,15 @@ file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 | 模式 | 状态 | 依赖 | 适用场景 |
 |------|------|------|---------|
 | **HTTP** | 可用 | ext-curl / 流封装 / PSR-18 任选其一 | 零扩展依赖，即刻可用 |
-| **gRPC** | 骨架 | ext-grpc + grpc/grpc + google/protobuf | 高性能、原生流式 |
+| **gRPC** | 一元 RPC | ext-grpc + grpc/grpc + 生成的 protobuf 消息 | 高性能；流式与 Election 需走 HTTP |
 | **auto** | 默认 | — | 目前等同 `http`（见下） |
 
-`auto` 与 `http` 等价：`GrpcTransport` 仍是骨架（三个方法都抛异常），所以**不会**自动切到 gRPC——真去探测 `ext-grpc` 只会让装了扩展的用户直接不可用。显式传 `'transport' => 'grpc'` 才会选中它。gRPC 落地后，这里的语义才会变。
+`auto` 与 `http` 等价：gRPC 目前只覆盖一元 RPC，watch / snapshot 这类流式调用以及 Election 都还必须走 HTTP，自动切过去只会让装了扩展的用户突然少一半功能。显式传 `'transport' => 'grpc'` 才会选中它。
+
+**gRPC 传输的现状（请注意）：**
+- **已实现**：一元 RPC（`send()`）——从 etcd v3.5 的 `rpc.proto` 用 `protoc` 生成消息类，请求体按类型化消息组装，字段名/类型由 proto 保证。
+- **未实现**：watch、snapshot 等流式调用，以及 `/v3/election/*`（那是另一个 proto，`v3electionpb`）——这些路径会被**按名字拒绝**并说明原因，不会静默失败。
+- **未端到端验证**：本项目的开发环境没有 `ext-grpc`，所以信道打开、凭据 metadata、`_simpleRequest`、超时与状态码映射都是**照 grpc_php_plugin 的输出模式手写、未跑过真实调用**。消息生成与请求组装有测试，网络往返没有。要走 gRPC 请自行验证后再上生产。
 
 ### 手动配置 PSR-18 HTTP 客户端
 
@@ -514,6 +569,7 @@ try {
 erikwang2013/etcd/
 ├── composer.json                    # 包定义：PSR-4 自动加载 + Laravel / Hyperf 自动发现
 ├── phpunit.xml.dist                 # PHPUnit 配置（unit / integration 两套套件）
+├── protos/                          # etcd v3.5 上游 proto + 生成脚本 + 生成产物（gRPC 用）
 ├── .github/workflows/ci.yml         # 合并前门禁：单测矩阵 / 语法底线 / 集成 / i18n 文档
 ├── config/etcd.php                  # 默认配置，供各框架发布（读取 ETCD_* 环境变量）
 ├── .github/workflows/release.yml    # 打 tag 时自动发布
@@ -526,14 +582,15 @@ erikwang2013/etcd/
 │   ├── features.svg                 #   功能设计图
 │   └── lifecycle.svg                #   生命周期图
 ├── src/
-│   ├── EtcdClient.php               # 顶层门面 + 单例：kv / watch / lease / auth / cluster / maintenance
+│   ├── EtcdClient.php               # 顶层门面 + 单例：八大子系统访问器
 │   ├── Mascot.php                   # 项目宠物 Etchy 的取值入口（svg / dataUri / path）
 │   ├── Install.php                  # Webman 插件钩子（WEBMAN_PLUGIN）
 │   ├── Transport/                   # 传输层
 │   │   ├── TransportInterface.php   #   传输抽象：send / sendRaw / watch
 │   │   ├── TransportSelector.php    #   auto / http / grpc 自动选择
 │   │   ├── HttpTransport.php        #   HTTP JSON 传输（完整可用）
-│   │   └── GrpcTransport.php        #   gRPC 传输（骨架）
+│   │   ├── GrpcTransport.php        #   gRPC 传输（一元 RPC；流式拒绝并说明）
+│   │   └── GrpcStub.php             #   Grpc\BaseStub 子类（独立文件，缺扩展时不加载）
 │   ├── Kv/KvClient.php              # KV 读写 / 前缀扫描 / 事务 / 压缩
 │   ├── Watch/WatchClient.php        # Watch 变更监听 + 断线续订
 │   ├── Lease/LeaseClient.php        # Lease 租约 grant / keepAlive / revoke
@@ -542,9 +599,11 @@ erikwang2013/etcd/
 │   │   ├── UserClient.php           #   用户 CRUD + 角色绑定
 │   │   └── RoleClient.php           #   角色 CRUD + 权限
 │   ├── Cluster/ClusterClient.php    # Cluster 集群成员管理
+│   ├── Election/                    # Election 选举（campaign / leader / observe / resign）
+│   ├── Lock/LockClient.php          # Lock 分布式锁（建在 Election 之上，网关无 /v3/lock/*）
 │   ├── Maintenance/                 # Maintenance 运维：status / alarm / defrag / snapshot
 │   ├── Exception/                   # 异常层次
-│   ├── Support/KeyValue.php         # 共用解码：KV 读取与 watch 事件返回同一形状
+│   ├── Support/                     # KeyValue / Int64 共用解码，WatchHandle 取消句柄
 │   └── Adapter/                     # 框架适配器
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider
