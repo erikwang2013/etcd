@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-labelledby="petTitle petDesc">
+  <title id="petTitle">Etchy — erikwang2013/etcd 项目宠物</title>
+  <desc id="petDesc">一只蓝色小象（PHP 的 elePHPant），头顶三节点 Raft 集群，鼻尖挂着 k/v 与 rev 标签，代表 PHP etcd v3 客户端。</desc>
+
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#66c9fb"/>
+      <stop offset="0.5" stop-color="#2f7fd1"/>
+      <stop offset="1" stop-color="#1a559b"/>
+    </linearGradient>
+    <linearGradient id="ear" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#4ba3e3"/>
+      <stop offset="1" stop-color="#1d5fa6"/>
+    </linearGradient>
+    <linearGradient id="nodeGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4ff0d6"/>
+      <stop offset="1" stop-color="#12a08f"/>
+    </linearGradient>
+    <radialGradient id="shadow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#0b1220" stop-opacity="0.34"/>
+      <stop offset="0.65" stop-color="#0b1220" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#0b1220" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="leaderGlow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fbbf24" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#fbbf24" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <style>
+    .eye  { transform-box: fill-box; transform-origin: center; animation: blink 6s ease-in-out infinite; }
+    .float{ animation: float 4.5s ease-in-out infinite; }
+    .pulse{ animation: pulse 2.6s ease-in-out infinite; }
+    .dash { animation: dash 2.4s linear infinite; }
+    @keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.08); } }
+    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+    @keyframes pulse { 0%, 100% { opacity: 0.15; } 50% { opacity: 0.6; } }
+    @keyframes dash  { to { stroke-dashoffset: -52; } }
+    .pill { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 21px; font-weight: 700; }
+    /* 动画之外不依赖 CSS：静态样式均写在内联属性上，样式表被清洗时画面不塌 */
+    @media (prefers-reduced-motion: reduce) {
+      .eye, .float, .pulse, .dash { animation: none; }
+    }
+  </style>
+
+  <!-- 地面投影（不参与浮动） -->
+  <ellipse cx="256" cy="468" rx="152" ry="26" fill="url(#shadow)"/>
+
+  <g class="float">
+    <!-- 头顶的 Raft 集群：三节点，中间为 Leader -->
+    <path class="dash" d="M176,152 L256,120 L336,152 Z" fill="none" stroke="#2dd4bf" stroke-opacity="0.5" stroke-width="3" stroke-dasharray="7 6" stroke-linejoin="round"/>
+    <circle cx="176" cy="152" r="24" fill="url(#nodeGrad)" stroke="#0b1220" stroke-width="4"/>
+    <circle cx="336" cy="152" r="24" fill="url(#nodeGrad)" stroke="#0b1220" stroke-width="4"/>
+    <circle cx="256" cy="120" r="46" fill="url(#leaderGlow)"/>
+    <circle class="pulse" cx="256" cy="120" r="38" fill="none" stroke="#fbbf24" stroke-width="3"/>
+    <circle cx="256" cy="120" r="30" fill="url(#nodeGrad)" stroke="#0b1220" stroke-width="4"/>
+    <circle cx="256" cy="120" r="9" fill="#fbbf24"/>
+
+    <!-- 耳朵 -->
+    <ellipse cx="118" cy="300" rx="56" ry="68" fill="url(#ear)" transform="rotate(-12 118 300)"/>
+    <ellipse cx="394" cy="300" rx="56" ry="68" fill="url(#ear)" transform="rotate(12 394 300)"/>
+    <ellipse cx="120" cy="304" rx="30" ry="40" fill="#0b1220" opacity="0.16" transform="rotate(-12 120 304)"/>
+    <ellipse cx="392" cy="304" rx="30" ry="40" fill="#0b1220" opacity="0.16" transform="rotate(12 392 304)"/>
+
+    <!-- 身体 -->
+    <ellipse cx="256" cy="312" rx="146" ry="136" fill="url(#body)"/>
+    <ellipse cx="212" cy="228" rx="72" ry="44" fill="#ffffff" opacity="0.12" transform="rotate(-22 212 228)"/>
+
+    <!-- 象牙 -->
+    <path d="M230,392 q-16,10 -13,28" fill="none" stroke="#f4f8ff" stroke-width="10" stroke-linecap="round" opacity="0.92"/>
+    <path d="M282,392 q16,10 13,28" fill="none" stroke="#f4f8ff" stroke-width="10" stroke-linecap="round" opacity="0.92"/>
+
+    <!-- 象鼻 -->
+    <path d="M252,346 C244,404 224,438 250,452 C274,464 302,450 302,426" fill="none" stroke="url(#body)" stroke-width="38" stroke-linecap="round"/>
+
+    <!-- 眼睛 -->
+    <g class="eye">
+      <ellipse cx="208" cy="290" rx="32" ry="36" fill="#f7fbff"/>
+      <circle cx="208" cy="292" r="17" fill="#10243a"/>
+      <circle cx="201" cy="284" r="6.5" fill="#ffffff"/>
+      <circle cx="215" cy="300" r="3" fill="#ffffff" opacity="0.7"/>
+    </g>
+    <g class="eye">
+      <ellipse cx="304" cy="290" rx="32" ry="36" fill="#f7fbff"/>
+      <circle cx="304" cy="292" r="17" fill="#10243a"/>
+      <circle cx="297" cy="284" r="6.5" fill="#ffffff"/>
+      <circle cx="311" cy="300" r="3" fill="#ffffff" opacity="0.7"/>
+    </g>
+
+    <!-- 腮红 -->
+    <ellipse cx="160" cy="332" rx="18" ry="11" fill="#ff8fa3" opacity="0.35"/>
+    <ellipse cx="352" cy="332" rx="18" ry="11" fill="#ff8fa3" opacity="0.35"/>
+
+    <!-- 身份标签：k/v 与 rev -->
+    <g transform="translate(162,360) rotate(-10)">
+      <rect x="-42" y="-20" width="84" height="40" rx="13" fill="#0b1220" opacity="0.86"/>
+      <text class="pill" x="0" y="8" text-anchor="middle" fill="#7ee7d8" font-size="21" font-weight="700">k/v</text>
+    </g>
+    <g transform="translate(346,360) rotate(9)">
+      <rect x="-42" y="-20" width="84" height="40" rx="13" fill="#0b1220" opacity="0.86"/>
+      <text class="pill" x="0" y="8" text-anchor="middle" fill="#fbbf24" font-size="21" font-weight="700">rev</text>
+    </g>
+  </g>
+</svg>

@@ -60,5 +60,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ steps.version.outputs.version }}"
-          body: ${{ steps.changelog.outputs.notes }}
+          body: |
+            <img src="https://raw.githubusercontent.com/erikwang2013/etcd/main/docs/pet.svg" alt="Etchy" width="120" align="right" />
+
+            ${{ steps.changelog.outputs.notes }}
           # No artifact packaging: this library ships as source only.

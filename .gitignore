@@ -9,3 +9,6 @@
 .swarm
 .mcp.json
 ruvector.db
+# i18n tooling
+__pycache__/
+*.pyc

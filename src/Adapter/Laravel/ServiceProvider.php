@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace Erikwang2013\Etcd\Adapter\Laravel;
 
 use Erikwang2013\Etcd\EtcdClient;
+use Erikwang2013\Etcd\Mascot;
 use Illuminate\Support\ServiceProvider as BaseServiceProvider;
 
 class ServiceProvider extends BaseServiceProvider
@@ -35,5 +36,10 @@ class ServiceProvider extends BaseServiceProvider
         $this->publishes([
             __DIR__ . '/../../../config/etcd.php' => config_path('etcd.php'),
         ], 'etcd-config');
+
+        // php artisan vendor:publish --tag=etcd-assets → public/vendor/etcd/pet.svg
+        $this->publishes([
+            Mascot::path() => public_path('vendor/etcd/pet.svg'),
+        ], 'etcd-assets');
     }
 }

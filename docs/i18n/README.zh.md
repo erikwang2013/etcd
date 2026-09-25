@@ -1,23 +1,40 @@
 # erikwang2013/etcd
 
 <p align="center">
+  <a href="../../README.md">简体中文</a> ·
+  <a href="README.en.md">English</a> ·
+  <a href="README.ko.md">한국어</a> ·
+  <a href="README.ru.md">Русский</a> ·
+  <a href="README.de.md">Deutsch</a> ·
+  <a href="README.fr.md">Français</a> ·
+  <a href="README.es.md">Español</a> ·
+  <a href="README.pt.md">Português</a> ·
+  <a href="README.hi.md">हिन्दी</a> ·
+  <a href="README.ar.md">العربية</a> ·
+  <a href="README.bn.md">বাংলা</a> ·
+  <a href="README.id.md">Bahasa Indonesia</a> ·
+  <a href="README.ja.md">日本語</a>
+</p>
+
+
+<p align="center">
   <b>简体中文</b> ·
-  <a href="./docs/i18n/README.en.md">English</a> ·
-  <a href="./docs/i18n/README.ko.md">한국어</a> ·
-  <a href="./docs/i18n/README.ru.md">Русский</a> ·
-  <a href="./docs/i18n/README.de.md">Deutsch</a> ·
-  <a href="./docs/i18n/README.fr.md">Français</a> ·
-  <a href="./docs/i18n/README.es.md">Español</a> ·
-  <a href="./docs/i18n/README.pt.md">Português</a> ·
-  <a href="./docs/i18n/README.hi.md">हिन्दी</a> ·
-  <a href="./docs/i18n/README.ar.md">العربية</a> ·
-  <a href="./docs/i18n/README.bn.md">বাংলা</a> ·
-  <a href="./docs/i18n/README.id.md">Bahasa Indonesia</a> ·
-  <a href="./docs/i18n/README.ja.md">日本語</a>
+  <a href="../i18n/README.en.md">English</a> ·
+  <a href="../i18n/README.ko.md">한국어</a> ·
+  <a href="../i18n/README.ru.md">Русский</a> ·
+  <a href="../i18n/README.de.md">Deutsch</a> ·
+  <a href="../i18n/README.fr.md">Français</a> ·
+  <a href="../i18n/README.es.md">Español</a> ·
+  <a href="../i18n/README.pt.md">Português</a> ·
+  <a href="../i18n/README.hi.md">हिन्दी</a> ·
+  <a href="../i18n/README.ar.md">العربية</a> ·
+  <a href="../i18n/README.bn.md">বাংলা</a> ·
+  <a href="../i18n/README.id.md">Bahasa Indonesia</a> ·
+  <a href="../i18n/README.ja.md">日本語</a>
 </p>
 
 <p align="center">
-  <img src="./docs/pet.svg" alt="项目宠物 Etchy" width="200" />
+  <img src="../pet.svg" alt="项目宠物 Etchy" width="200" />
 </p>
 
 <p align="center">
@@ -494,21 +511,21 @@ erikwang2013/etcd/
 
 | 图 | 回答的问题 | 文件 |
 |----|-----------|------|
-| 架构设计 | 分成哪几层、依赖朝哪走、错误怎么分流 | [`docs/architecture.svg`](./docs/architecture.svg) |
-| 功能设计 | 每个子系统提供哪些方法、有哪些行为约定 | [`docs/features.svg`](./docs/features.svg) |
-| 生命周期 | 一次请求 / 一条监听 / 一个租约 各自怎么走完 | [`docs/lifecycle.svg`](./docs/lifecycle.svg) |
+| 架构设计 | 分成哪几层、依赖朝哪走、错误怎么分流 | [`docs/architecture.svg`](diagrams/zh/architecture.svg) |
+| 功能设计 | 每个子系统提供哪些方法、有哪些行为约定 | [`docs/features.svg`](diagrams/zh/features.svg) |
+| 生命周期 | 一次请求 / 一条监听 / 一个租约 各自怎么走完 | [`docs/lifecycle.svg`](diagrams/zh/lifecycle.svg) |
 
 ### 架构设计
 
-![架构设计图](./docs/architecture.svg)
+![架构设计图](diagrams/zh/architecture.svg)
 
 ### 功能设计
 
-![功能设计图](./docs/features.svg)
+![功能设计图](diagrams/zh/features.svg)
 
 ### 生命周期
 
-![生命周期图](./docs/lifecycle.svg)
+![生命周期图](diagrams/zh/lifecycle.svg)
 
 ### 在代码里用 Etchy
 
@@ -538,8 +555,8 @@ php artisan vendor:publish --tag=etcd-assets
       <td align="center"><b>支付宝 / Alipay</b></td>
     </tr>
     <tr>
-      <td align="center"><img src="./docs/weixinpay.png" alt="微信支付" width="130" height="130" /></td>
-      <td align="center"><img src="./docs/alipay.png" alt="支付宝" width="130" height="130" /></td>
+      <td align="center"><img src="../weixinpay.png" alt="微信支付" width="130" height="130" /></td>
+      <td align="center"><img src="../alipay.png" alt="支付宝" width="130" height="130" /></td>
     </tr>
   </table>
 </p>

@@ -14,6 +14,8 @@
 
 ## 架构总览
 
+> 完整图示见 [`architecture.svg`](./architecture.svg)、[`features.svg`](./features.svg)、[`lifecycle.svg`](./lifecycle.svg)。
+
 ```
 ┌──────────────────────────────────────────────────────┐
 │                    EtcdClient                         │
@@ -273,7 +275,10 @@ erikwang2013/etcd/
 ├── config/etcd.php                    # 默认配置
 ├── README.md
 ├── docs/
-│   └── design-cn.md                   # 本设计文档
+│   ├── design-cn.md                   # 本设计文档
+│   ├── architecture.svg               # 架构设计图
+│   ├── features.svg                   # 功能设计图
+│   └── lifecycle.svg                  # 生命周期图
 ├── src/
 │   ├── EtcdClient.php                 # 顶层门面
 │   ├── Transport/

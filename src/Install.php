@@ -33,6 +33,8 @@ class Install
             copy(__DIR__ . '/../config/etcd.php', $configFile);
         }
         echo "erikwang2013/etcd plugin installed. Config at config/plugin/erikwang2013/etcd/etcd.php\n";
+        // Etchy 随包发布，需要时用 Erikwang2013\Etcd\Mascot::path() 取
+        echo "Mascot: docs/pet.svg\n";
     }
 
     public static function uninstall(): void

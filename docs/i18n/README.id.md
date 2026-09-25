@@ -1,45 +1,45 @@
 # erikwang2013/etcd
 
 <p align="center">
-  <b>简体中文</b> ·
-  <a href="./docs/i18n/README.en.md">English</a> ·
-  <a href="./docs/i18n/README.ko.md">한국어</a> ·
-  <a href="./docs/i18n/README.ru.md">Русский</a> ·
-  <a href="./docs/i18n/README.de.md">Deutsch</a> ·
-  <a href="./docs/i18n/README.fr.md">Français</a> ·
-  <a href="./docs/i18n/README.es.md">Español</a> ·
-  <a href="./docs/i18n/README.pt.md">Português</a> ·
-  <a href="./docs/i18n/README.hi.md">हिन्दी</a> ·
-  <a href="./docs/i18n/README.ar.md">العربية</a> ·
-  <a href="./docs/i18n/README.bn.md">বাংলা</a> ·
-  <a href="./docs/i18n/README.id.md">Bahasa Indonesia</a> ·
-  <a href="./docs/i18n/README.ja.md">日本語</a>
+  <a href="../../README.md">简体中文</a> ·
+  <a href="README.en.md">English</a> ·
+  <a href="README.ko.md">한국어</a> ·
+  <a href="README.ru.md">Русский</a> ·
+  <a href="README.de.md">Deutsch</a> ·
+  <a href="README.fr.md">Français</a> ·
+  <a href="README.es.md">Español</a> ·
+  <a href="README.pt.md">Português</a> ·
+  <a href="README.hi.md">हिन्दी</a> ·
+  <a href="README.ar.md">العربية</a> ·
+  <a href="README.bn.md">বাংলা</a> ·
+  <a href="README.id.md">Bahasa Indonesia</a> ·
+  <a href="README.ja.md">日本語</a>
 </p>
 
 <p align="center">
-  <img src="./docs/pet.svg" alt="项目宠物 Etchy" width="200" />
+  <img src="../pet.svg" alt="Maskot proyek Etchy" width="200" />
 </p>
 
 <p align="center">
-  <b>Etchy</b> · 头顶三节点 Raft 集群、鼻尖挂着 <code>k/v</code> 与 <code>rev</code> 的小象 ——<br/>
-  守着你的配置和租约：掉线自己重连，过期自己清理。
+  <b>Etchy</b> · gajah kecil bertopi klaster Raft tiga node dan membawa <code>k/v</code> serta <code>rev</code> di ujung belalainya ——<br/>
+  penjaga konfigurasi dan lease Anda: putus, ia menyambung sendiri; kedaluwarsa, ia membersihkan sendiri.
 </p>
 
-PHP etcd v3 客户端 —— gRPC + HTTP 双模传输，覆盖 etcd v3 全部 API（KV / Watch / Lease / Auth / Cluster / Maintenance），开箱适配 **Laravel / Hyperf / ThinkPHP / Webman**。
+Klien etcd v3 untuk PHP —— transport ganda gRPC + HTTP, mencakup seluruh API etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance), siap pakai dengan **Laravel / Hyperf / ThinkPHP / Webman**.
 
-## 要求
+## Persyaratan
 
 - PHP >= 8.1
-- etcd v3.x 服务端
-- PSR-18 + PSR-17 HTTP 客户端（HTTP 传输必需，各框架通常自带）
+- Server etcd v3.x
+- Klien HTTP PSR-18 + PSR-17 (wajib untuk transport HTTP, biasanya sudah tersedia di framework)
 
-## 安装
+## Instalasi
 
 ```bash
 composer require erikwang2013/etcd
 ```
 
-## 快速开始
+## Mulai Cepat
 
 ```php
 use Erikwang2013\Etcd\EtcdClient;
@@ -58,7 +58,7 @@ $kv = $etcd->kv()->getOrFail('/app/config');
 
 // 前缀扫描
 $all = $etcd->kv()->getByPrefix('/app/');
-echo "共 {$all['count']} 条\n";
+echo "total {$all['count']} key\n";
 
 // 删除
 $etcd->kv()->delete('/app/config');
@@ -72,7 +72,7 @@ $etcd->kv()->put('/session/123', 'active', ['lease' => $lease['ID']]);
 $etcd->lease()->keepAlive($lease['ID']);
 ```
 
-## 配置
+## Konfigurasi
 
 ```php
 $etcd = new EtcdClient([
@@ -88,23 +88,23 @@ $etcd = new EtcdClient([
 ]);
 ```
 
-### 环境变量
+### Variabel Environment
 
-不传配置时自动读取环境变量：
+Tanpa konfigurasi eksplisit, variabel berikut dibaca otomatis:
 
-| 变量 | 默认值 | 说明 |
+| Variabel | Default | Keterangan |
 |------|--------|------|
-| `ETCD_ENDPOINTS` | `127.0.0.1:2379` | 逗号分隔的多节点地址 |
+| `ETCD_ENDPOINTS` | `127.0.0.1:2379` | alamat node, dipisah koma |
 | `ETCD_TRANSPORT` | `auto` | auto / http / grpc |
-| `ETCD_TIMEOUT` | `5.0` | 请求超时（秒） |
+| `ETCD_TIMEOUT` | `5.0` | timeout request (detik) |
 | `ETCD_SCHEME` | `http` | http / https |
-| `ETCD_RETRY` | `2` | 连接重试次数 |
-| `ETCD_USER` | — | etcd 用户名 |
-| `ETCD_PASSWORD` | — | etcd 密码 |
+| `ETCD_RETRY` | `2` | jumlah percobaan ulang koneksi |
+| `ETCD_USER` | — | nama pengguna etcd |
+| `ETCD_PASSWORD` | — | kata sandi etcd |
 
-## API 参考
+## Referensi API
 
-### KV — 键值操作
+### KV — Operasi Key/Value
 
 ```php
 // 写入
@@ -158,10 +158,10 @@ $etcd->kv()->txn(
 $etcd->kv()->compact(1000);
 ```
 
-**比较目标（target）常量：** `0`=VERSION, `1`=CREATE, `2`=MOD, `3`=VALUE, `4`=LEASE  
-**比较结果（result）常量：** `0`=EQUAL, `1`=GREATER, `2`=LESS, `3`=NOT_EQUAL
+**Konstanta target perbandingan:** `0`=VERSION, `1`=CREATE, `2`=MOD, `3`=VALUE, `4`=LEASE  
+**Konstanta hasil perbandingan:** `0`=EQUAL, `1`=GREATER, `2`=LESS, `3`=NOT_EQUAL
 
-### Watch — 变更监听
+### Watch — Pemantauan Perubahan
 
 ```php
 // 监听单个 key（阻塞模式，建议在协程/独立进程中运行）
@@ -180,9 +180,9 @@ $etcd->watch()->watchPrefix('/config/', $callback, [
 ]);
 ```
 
-**断线重连：** Watch 连接断开时自动从上一次收到的 revision 续订，不会丢失事件。
+**Reconnect:** saat koneksi Watch terputus, klien otomatis berlangganan ulang dari revision terakhir yang diterima, jadi tidak ada event yang hilang.
 
-### Lease — 租约
+### Lease — Sewa
 
 ```php
 // 创建租约
@@ -191,7 +191,7 @@ $lease = $etcd->lease()->grant(300, 99999);      // 指定租约 ID
 
 // 续约（单次）
 $result = $etcd->lease()->keepAlive($lease['ID']);
-echo "TTL 剩余: {$result['TTL']} 秒";
+echo "TTL tersisa: {$result['TTL']} detik";
 
 // 查看租约状态
 $info = $etcd->lease()->timeToLive($lease['ID']);
@@ -204,9 +204,9 @@ $leases = $etcd->lease()->list();
 $etcd->lease()->revoke($lease['ID']);
 ```
 
-**典型场景：** 服务注册时创建租约 + 写入 key，定时调用 `keepAlive()` 心跳续约；服务停止后租约到期自动清理。
+**Skenario umum:** saat registrasi layanan, buat lease lalu tulis key; panggil `keepAlive()` berkala sebagai heartbeat. Setelah layanan berhenti, lease kedaluwarsa dan semuanya dibersihkan otomatis.
 
-### Auth — 认证与权限
+### Auth — Autentikasi dan Izin
 
 ```php
 $auth = $etcd->auth();
@@ -237,9 +237,9 @@ $auth->disable();          // 关闭认证
 $status = $auth->status(); // ['enabled' => true, 'authRevision' => 5]
 ```
 
-**注意：** 开启认证后，客户端必须配置 `auth.user` 和 `auth.password` 才能继续操作。
+**Catatan:** setelah auth diaktifkan, klien wajib dikonfigurasi dengan `auth.user` dan `auth.password` agar bisa terus beroperasi.
 
-### Cluster — 集群管理
+### Cluster — Manajemen Klaster
 
 ```php
 // 查看集群成员
@@ -259,7 +259,7 @@ $etcd->cluster()->memberPromote(789012);
 $etcd->cluster()->memberRemove(345678);
 ```
 
-### Maintenance — 运维
+### Maintenance — Operasional
 
 ```php
 // 查看节点状态
@@ -281,21 +281,21 @@ $snapshot = $etcd->maintenance()->snapshot();
 file_put_contents('/backup/etcd-snapshot.db', $snapshot);
 ```
 
-## 传输模式
+## Mode Transport
 
-| 模式 | 状态 | 依赖 | 适用场景 |
+| Mode | Status | Dependensi | Cocok untuk |
 |------|------|------|---------|
-| **HTTP** | 可用 | PSR-18 + PSR-17 | 零扩展依赖，即刻可用 |
-| **gRPC** | 骨架 | ext-grpc + grpc/grpc + google/protobuf | 高性能、原生流式 |
-| **auto** | 默认 | 自动检测 | 有 gRPC 则用 gRPC，否则 HTTP |
+| **HTTP** | Tersedia | PSR-18 + PSR-17 | tanpa dependensi ekstensi, langsung jalan |
+| **gRPC** | Kerangka | ext-grpc + grpc/grpc + google/protobuf | throughput tinggi, streaming native |
+| **auto** | Default | deteksi otomatis | pakai gRPC bila tersedia, jika tidak HTTP |
 
-`auto` 模式检测逻辑：
-1. `extension_loaded('grpc')` — C 扩展已加载？
-2. `class_exists('Grpc\BaseStub')` — `grpc/grpc` composer 包已安装？
+Logika deteksi mode `auto`:
+1. `extension_loaded('grpc')` — apakah ekstensi C sudah dimuat?
+2. `class_exists('Grpc\BaseStub')` — apakah paket composer `grpc/grpc` sudah terpasang?
 
-两者都满足才走 gRPC，否则回退 HTTP。
+Klien baru memakai gRPC bila keduanya terpenuhi; jika tidak, ia kembali ke HTTP.
 
-### 手动配置 PSR-18 HTTP 客户端
+### Konfigurasi Manual Klien HTTP PSR-18
 
 ```php
 use Erikwang2013\Etcd\Transport\HttpTransport;
@@ -310,11 +310,11 @@ $transport->setHttpClient(
 );
 ```
 
-## 框架集成
+## Integrasi Framework
 
 ### Laravel
 
-安装即用。composer.json 的 `extra.laravel` 自动发现 ServiceProvider 和 Facade。
+Langsung pakai setelah instalasi. `extra.laravel` pada composer.json menemukan ServiceProvider dan Facade secara otomatis.
 
 ```php
 // Facade 方式
@@ -336,14 +336,14 @@ class MyService
 }
 ```
 
-发布配置文件：
+Terbitkan berkas konfigurasi:
 
 ```bash
 php artisan vendor:publish --tag=etcd-config
 # → config/etcd.php
 ```
 
-`.env` 配置：
+Konfigurasi `.env`:
 
 ```env
 ETCD_ENDPOINTS=10.0.0.1:2379,10.0.0.2:2379
@@ -353,7 +353,7 @@ ETCD_PASSWORD=secret
 
 ### Hyperf
 
-安装即用。Hyperf 自动发现 `ConfigProvider`。
+Langsung pakai setelah instalasi. Hyperf menemukan `ConfigProvider` secara otomatis.
 
 ```php
 use Erikwang2013\Etcd\EtcdClient;
@@ -374,7 +374,7 @@ class MyService
 $etcd = make(EtcdClient::class);
 ```
 
-发布配置：
+Terbitkan konfigurasi:
 
 ```bash
 php bin/hyperf.php vendor:publish erikwang2013/etcd
@@ -383,7 +383,7 @@ php bin/hyperf.php vendor:publish erikwang2013/etcd
 
 ### ThinkPHP
 
-1. 安装后，在 `app/service.php` 中注册：
+1. Setelah instalasi, daftarkan service di `app/service.php`:
 
 ```php
 return [
@@ -391,9 +391,9 @@ return [
 ];
 ```
 
-2. 创建 `config/etcd.php` 配置文件。
+2. Buat berkas konfigurasi `config/etcd.php`.
 
-使用：
+Pemakaian:
 
 ```php
 // Facade 方式
@@ -406,7 +406,7 @@ app('etcd')->kv()->get('/key');
 
 ### Webman
 
-安装即用，无需额外配置。
+Langsung pakai setelah instalasi, tanpa konfigurasi tambahan.
 
 ```php
 use Erikwang2013\Etcd\EtcdClient;
@@ -415,9 +415,9 @@ $etcd = EtcdClient::instance();
 $etcd->kv()->put('/key', 'value');
 ```
 
-如需自定义配置，编辑 `plugin/erikwang2013/etcd/config/etcd.php`。
+Untuk konfigurasi khusus, sunting `plugin/erikwang2013/etcd/config/etcd.php`.
 
-## 异常处理
+## Penanganan Exception
 
 ```php
 use Erikwang2013\Etcd\Exception\{
@@ -440,7 +440,7 @@ try {
 }
 ```
 
-## 项目结构
+## Struktur Proyek
 
 ```
 erikwang2013/etcd/
@@ -488,31 +488,31 @@ erikwang2013/etcd/
     └── Support/                     # FakeTransport、PSR HTTP 桩
 ```
 
-## 架构与设计图
+## Arsitektur dan Diagram Desain
 
-三张图按「结构 → 能力 → 时序」组织，可点击单独查看：
+Tiga diagram disusun sebagai struktur → kemampuan → urutan waktu; klik untuk membuka masing-masing:
 
-| 图 | 回答的问题 | 文件 |
+| Diagram | Pertanyaan yang dijawab | Berkas |
 |----|-----------|------|
-| 架构设计 | 分成哪几层、依赖朝哪走、错误怎么分流 | [`docs/architecture.svg`](./docs/architecture.svg) |
-| 功能设计 | 每个子系统提供哪些方法、有哪些行为约定 | [`docs/features.svg`](./docs/features.svg) |
-| 生命周期 | 一次请求 / 一条监听 / 一个租约 各自怎么走完 | [`docs/lifecycle.svg`](./docs/lifecycle.svg) |
+| Arsitektur | terbagi jadi lapisan apa saja, ke arah mana dependensi mengalir, bagaimana error bercabang | [`diagrams/id/architecture.svg`](diagrams/id/architecture.svg) |
+| Desain fitur | metode apa saja yang disediakan tiap subsistem dan kontrak perilakunya | [`diagrams/id/features.svg`](diagrams/id/features.svg) |
+| Siklus hidup | bagaimana satu request / satu watch / satu lease berjalan sampai tuntas | [`diagrams/id/lifecycle.svg`](diagrams/id/lifecycle.svg) |
 
-### 架构设计
+### Arsitektur
 
-![架构设计图](./docs/architecture.svg)
+![Diagram arsitektur](diagrams/id/architecture.svg)
 
-### 功能设计
+### Desain Fitur
 
-![功能设计图](./docs/features.svg)
+![Diagram desain fitur](diagrams/id/features.svg)
 
-### 生命周期
+### Siklus Hidup
 
-![生命周期图](./docs/lifecycle.svg)
+![Diagram siklus hidup](diagrams/id/lifecycle.svg)
 
-### 在代码里用 Etchy
+### Memakai Etchy di Kode
 
-图形随包发布，`Mascot` 是唯一取值入口，做管理面板 / 状态页时不必再拷一份：
+Grafik ikut dipublikasikan bersama paket dan `Mascot` adalah satu-satunya pintu akses, jadi panel admin atau halaman status tidak perlu menyalinnya lagi:
 
 ```php
 use Erikwang2013\Etcd\Mascot;
@@ -522,24 +522,24 @@ echo '<img src="' . Mascot::dataUri() . '" alt="Etchy">';    // data URI，不�
 copy(Mascot::path(), __DIR__ . '/public/etcd.svg');          // 或自行落到静态目录
 ```
 
-Laravel 下可直接发布到 `public/`：
+Di Laravel, aset bisa langsung diterbitkan ke `public/`:
 
 ```bash
 php artisan vendor:publish --tag=etcd-assets
 # → public/vendor/etcd/pet.svg
 ```
 
-## 开源不易，欢迎支持 / Support This Project
+## Dukung Proyek Ini / Support This Project
 
 <p align="center">
   <table>
     <tr>
-      <td align="center"><b>微信 / WeChat</b></td>
-      <td align="center"><b>支付宝 / Alipay</b></td>
+      <td align="center"><b>WeChat</b></td>
+      <td align="center"><b>Alipay</b></td>
     </tr>
     <tr>
-      <td align="center"><img src="./docs/weixinpay.png" alt="微信支付" width="130" height="130" /></td>
-      <td align="center"><img src="./docs/alipay.png" alt="支付宝" width="130" height="130" /></td>
+      <td align="center"><img src="../weixinpay.png" alt="WeChat Pay" width="130" height="130" /></td>
+      <td align="center"><img src="../alipay.png" alt="Alipay" width="130" height="130" /></td>
     </tr>
   </table>
 </p>

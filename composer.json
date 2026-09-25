@@ -1,6 +1,6 @@
 {
     "name": "erikwang2013/etcd",
-    "description": "PHP etcd v3 client with gRPC + HTTP dual transport. Supports Laravel, Hyperf, ThinkPHP, Webman.",
+    "description": "PHP etcd v3 client with gRPC + HTTP dual transport and the full v3 API (KV, Watch, Lease, Auth, Cluster, Maintenance). First-class Laravel, Hyperf, ThinkPHP and Webman adapters.",
     "type": "library",
     "license": "MIT",
     "authors": [
