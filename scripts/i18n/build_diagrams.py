@@ -94,6 +94,8 @@ T = {
     "arch.app.hyperf.sub": "ConfigProvider（自动发现）",
     "arch.app.thinkphp.sub": "Service + Facade",
     "arch.app.webman.sub": "Plugin::install()",
+    "arch.app.yii2.sub": "Component + Bootstrap",
+    "arch.app.yii3.sub": "config-plugin（params + di）",
     "arch.b2": "门面层",
     "arch.facade": "EtcdClient —— 统一入口，惰性构建八大子系统",
     "arch.b2.note": "领域方法调用",
@@ -486,14 +488,18 @@ def architecture():
 
     band(y, "①", "arch.b1", SKY)
     y += 14
-    for i, (t, sk) in enumerate([("Laravel", "arch.app.laravel.sub"), ("Hyperf", "arch.app.hyperf.sub"),
-                                 ("ThinkPHP", "arch.app.thinkphp.sub"), ("Webman", "arch.app.webman.sub")]):
-        x = MX + i * 210
-        p.append(rect(x, y, 190, 80, rx=12))
-        p.append(txt(x + 95, y + 34, t, size=16, fill=TEXT, weight="700", anchor="middle"))
-        p.append("".join(txt(x + 95, y + 58 + j * 14, ln, size=11, fill=MUTED, anchor="middle")
-                         for j, ln in enumerate(fit(sk, 166, 11, 2))))
-    y += 80
+    apps = [("Laravel", "arch.app.laravel.sub"), ("Hyperf", "arch.app.hyperf.sub"),
+            ("ThinkPHP", "arch.app.thinkphp.sub"), ("Yii2", "arch.app.yii2.sub"),
+            ("Yii3", "arch.app.yii3.sub"), ("Webman", "arch.app.webman.sub")]
+    cwa = (MW - 40) // 3          # 260: six adapters, three per row, same rhythm as ③
+    for i, (t, sk) in enumerate(apps):
+        x = MX + (i % 3) * (cwa + 20)
+        yy = y + (i // 3) * 98
+        p.append(rect(x, yy, cwa, 82, rx=12))
+        p.append(txt(x + cwa / 2, yy + 34, t, size=16, fill=TEXT, weight="700", anchor="middle"))
+        p.append("".join(txt(x + cwa / 2, yy + 58 + j * 14, ln, size=11, fill=MUTED, anchor="middle")
+                         for j, ln in enumerate(fit(sk, cwa - 24, 11, 2))))
+    y += 82 + 98 * ((len(apps) - 1) // 3)
     arrow(y, "arch.b1.note")
     y += GAP
 

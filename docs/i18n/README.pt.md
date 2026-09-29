@@ -25,7 +25,7 @@
   ele guarda sua config e seus leases: reconecta sozinho quando cai, limpa sozinho quando expira.
 </p>
 
-Cliente PHP para etcd v3 — transporte duplo (HTTP completo / gRPC para RPCs unários), cobrindo toda a API do etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock), com adaptadores prontos para **Laravel / Hyperf / ThinkPHP / Webman**.
+Cliente PHP para etcd v3 — transporte duplo (HTTP completo / gRPC para RPCs unários), cobrindo toda a API do etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock), com adaptadores prontos para **Laravel / Hyperf / ThinkPHP / Webman / Yii2 / Yii3**.
 
 ## Requisitos
 
@@ -517,6 +517,74 @@ $etcd->kv()->put('/key', 'value');
 
 Para personalizar, edite `plugin/erikwang2013/etcd/config/etcd.php`.
 
+### Yii2
+
+Funciona logo após a instalação. Registre o componente na configuração da aplicação: o `extra.bootstrap` vincula o `EtcdClient` ao contêiner de DI, então a injeção por construtor recebe a mesma instância que o componente mantém (se instalou com `--no-plugins`, adicione `Erikwang2013\Etcd\Adapter\Yii\Bootstrap::class` ao array `bootstrap`).
+
+```php
+// config/web.php
+return [
+    'components' => [
+        'etcd' => [
+            'class'   => Erikwang2013\Etcd\Adapter\Yii\Component::class,
+            'options' => [                          // se omitido, usa as variáveis ETCD_*
+                'endpoints' => ['10.0.0.1:2379'],
+                'timeout'   => 3.0,
+            ],
+        ],
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// via componente
+Yii::$app->etcd->kv()->put('/key', 'value');
+$val = Yii::$app->etcd->kv()->get('/key');
+
+// via injeção de dependência
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
+### Yii3
+
+Funciona logo após a instalação. O yiisoft/config funde a declaração `config-plugin` do pacote nos grupos `params` e `di`, então o `EtcdClient` fica no contêiner (o yiisoft/di mantém apenas instâncias compartilhadas — toda injeção recebe o mesmo cliente).
+
+```php
+// config/common/params.php — se omitido, usa os padrões de config/etcd.php (variáveis ETCD_*);
+// se escrever, a chave é substituída por inteiro: liste todos os campos necessários
+return [
+    'erikwang2013/etcd' => [
+        'endpoints' => ['10.0.0.1:2379'],
+        'timeout'   => 3.0,
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// qualquer action / service: basta a injeção do contêiner
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
 ## Tratamento de erros
 
 ```php
@@ -544,7 +612,7 @@ try {
 
 ```
 erikwang2013/etcd/
-├── composer.json                    # definição do pacote: autoload PSR-4 + descoberta Laravel / Hyperf
+├── composer.json                    # definição do pacote: autoload PSR-4 + descoberta Laravel / Hyperf / Yii2 / Yii3
 ├── phpunit.xml.dist                 # config do PHPUnit (suítes unit / integration)
 ├── protos/                          # proto upstream do etcd v3.5 + script de geração + saída gerada (para gRPC)
 ├── .github/workflows/ci.yml         # portão antes do merge: matriz unit / base de sintaxe / integração / docs i18n
@@ -585,6 +653,8 @@ erikwang2013/etcd/
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider
 │       ├── ThinkPHP/                #   Service + Facade
+│       ├── Yii/                     #   Component + Bootstrap
+│       ├── Yii3/                    #   config-plugin (params + di)
 │       └── Webman/                  #   Plugin
 └── tests/
     ├── Unit/                        # testes unitários (por cliente / transporte / adaptador / classe de mensagem)

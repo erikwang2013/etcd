@@ -25,7 +25,7 @@
   आपके कॉन्फ़िग और लीज़ का रखवाला: कनेक्शन टूटे तो खुद जुड़ता है, एक्सपायर हो तो खुद साफ़ करता है।
 </p>
 
-PHP etcd v3 क्लाइंट —— दोहरा मोड ट्रांसपोर्ट (HTTP पूरी सुविधाएँ / gRPC यूनरी RPC), etcd v3 के सभी API (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock) कवर करता है, और **Laravel / Hyperf / ThinkPHP / Webman** के लिए बिना किसी सेटअप के तैयार है।
+PHP etcd v3 क्लाइंट —— दोहरा मोड ट्रांसपोर्ट (HTTP पूरी सुविधाएँ / gRPC यूनरी RPC), etcd v3 के सभी API (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock) कवर करता है, और **Laravel / Hyperf / ThinkPHP / Webman / Yii2 / Yii3** के लिए बिना किसी सेटअप के तैयार है।
 
 ## आवश्यकताएँ
 
@@ -517,6 +517,74 @@ $etcd->kv()->put('/key', 'value');
 
 कस्टम कॉन्फ़िग चाहिए तो `plugin/erikwang2013/etcd/config/etcd.php` एडिट करें।
 
+### Yii2
+
+इंस्टॉल करते ही काम करता है। ऐप कॉन्फ़िग में कंपोनेंट रजिस्टर करें: `extra.bootstrap` `EtcdClient` को DI कंटेनर में बाइंड कर देता है, इसलिए कंस्ट्रक्टर इंजेक्शन को वही इंस्टेंस मिलता है जो कंपोनेंट के पास है (`--no-plugins` से इंस्टॉल किया हो तो `bootstrap` ऐरे में `Erikwang2013\Etcd\Adapter\Yii\Bootstrap::class` जोड़ें)।
+
+```php
+// config/web.php
+return [
+    'components' => [
+        'etcd' => [
+            'class'   => Erikwang2013\Etcd\Adapter\Yii\Component::class,
+            'options' => [                          // छोड़ दें तो ETCD_* एनवायरनमेंट वेरिएबल पढ़े जाते हैं
+                'endpoints' => ['10.0.0.1:2379'],
+                'timeout'   => 3.0,
+            ],
+        ],
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// कंपोनेंट से
+Yii::$app->etcd->kv()->put('/key', 'value');
+$val = Yii::$app->etcd->kv()->get('/key');
+
+// डिपेंडेंसी इंजेक्शन से
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
+### Yii3
+
+इंस्टॉल करते ही काम करता है। yiisoft/config पैकेज के `config-plugin` डिक्लेरेशन को `params` और `di` ग्रुप में मर्ज कर देता है, इसलिए `EtcdClient` कंटेनर में मिलता है (yiisoft/di सिर्फ़ शेयर्ड इंस्टेंस रखता है — कितनी भी बार इंजेक्ट करें, वही क्लाइंट मिलता है)।
+
+```php
+// config/common/params.php — न लिखें तो config/etcd.php के डिफ़ॉल्ट (ETCD_* वेरिएबल) चलेंगे;
+// लिखें तो पूरी की-बदल जाती है, ज़रूरी सारे फ़ील्ड साथ लिखें
+return [
+    'erikwang2013/etcd' => [
+        'endpoints' => ['10.0.0.1:2379'],
+        'timeout'   => 3.0,
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// कोई भी action / service — कंटेनर इंजेक्शन काफ़ी है
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
 ## त्रुटि हैंडलिंग
 
 ```php
@@ -544,7 +612,7 @@ try {
 
 ```
 erikwang2013/etcd/
-├── composer.json                    # पैकेज परिभाषा: PSR-4 ऑटोलोड + Laravel / Hyperf ऑटो-डिस्कवरी
+├── composer.json                    # पैकेज परिभाषा: PSR-4 ऑटोलोड + Laravel / Hyperf / Yii2 / Yii3 ऑटो-डिस्कवरी
 ├── phpunit.xml.dist                 # PHPUnit कॉन्फ़िग (unit / integration दो सूट)
 ├── protos/                          # etcd v3.5 अपस्ट्रीम proto + जनरेशन स्क्रिप्ट + जनरेट किया आउटपुट (gRPC के लिए)
 ├── .github/workflows/ci.yml         # मर्ज से पहले गेट: यूनिट मैट्रिक्स / सिंटैक्स बेसलाइन / इंटीग्रेशन / i18n डॉक्स
@@ -585,6 +653,8 @@ erikwang2013/etcd/
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider
 │       ├── ThinkPHP/                #   Service + Facade
+│       ├── Yii/                     #   Component + Bootstrap
+│       ├── Yii3/                    #   config-plugin (params + di)
 │       └── Webman/                  #   Plugin
 └── tests/
     ├── Unit/                        # यूनिट टेस्ट (हर क्लाइंट / ट्रांसपोर्ट / अडैप्टर / मैसेज क्लास)

@@ -25,7 +25,7 @@
   守着你的配置和租约：掉线自己重连，过期自己清理。
 </p>
 
-PHP etcd v3 客户端 —— 双模传输（HTTP 全功能 / gRPC 一元 RPC），覆盖 etcd v3 全部 API（KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock），开箱适配 **Laravel / Hyperf / ThinkPHP / Webman**。
+PHP etcd v3 客户端 —— 双模传输（HTTP 全功能 / gRPC 一元 RPC），覆盖 etcd v3 全部 API（KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock），开箱适配 **Laravel / Hyperf / ThinkPHP / Webman / Yii2 / Yii3**。
 
 ## 要求
 
@@ -523,6 +523,74 @@ $etcd->kv()->put('/key', 'value');
 
 如需自定义配置，编辑 `plugin/erikwang2013/etcd/config/etcd.php`。
 
+### Yii2
+
+安装即用。在应用配置里注册组件，`extra.bootstrap` 会自动把 `EtcdClient` 绑进 DI 容器，构造函数注入拿到的就是应用组件里那个实例（用 `--no-plugins` 装的把 `Erikwang2013\Etcd\Adapter\Yii\Bootstrap::class` 加进 `bootstrap` 数组）。
+
+```php
+// config/web.php
+return [
+    'components' => [
+        'etcd' => [
+            'class'   => Erikwang2013\Etcd\Adapter\Yii\Component::class,
+            'options' => [                          // 省略则读取 ETCD_* 环境变量
+                'endpoints' => ['10.0.0.1:2379'],
+                'timeout'   => 3.0,
+            ],
+        ],
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// 组件方式
+Yii::$app->etcd->kv()->put('/key', 'value');
+$val = Yii::$app->etcd->kv()->get('/key');
+
+// 依赖注入方式
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
+### Yii3
+
+安装即用。包里的 `config-plugin` 声明会被 yiisoft/config 合并进 `params` 与 `di` 两组，容器里就有 `EtcdClient` 了（yiisoft/di 只保留共享实例，注入多少次都是同一个客户端）。
+
+```php
+// config/common/params.php —— 不写就用 config/etcd.php 的默认值（ETCD_* 环境变量）；
+// 写了就是整键替换，用到的字段要一起写上
+return [
+    'erikwang2013/etcd' => [
+        'endpoints' => ['10.0.0.1:2379'],
+        'timeout'   => 3.0,
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// 任何 action / service：容器注入即可
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
 ## 异常处理
 
 ```php
@@ -550,7 +618,7 @@ try {
 
 ```
 erikwang2013/etcd/
-├── composer.json                    # 包定义：PSR-4 自动加载 + Laravel / Hyperf 自动发现
+├── composer.json                    # 包定义：PSR-4 自动加载 + Laravel / Hyperf / Yii2 / Yii3 自动发现
 ├── phpunit.xml.dist                 # PHPUnit 配置（unit / integration 两套套件）
 ├── protos/                          # etcd v3.5 上游 proto + 生成脚本 + 生成产物（gRPC 用）
 ├── .github/workflows/ci.yml         # 合并前门禁：单测矩阵 / 语法底线 / 集成 / i18n 文档
@@ -591,6 +659,8 @@ erikwang2013/etcd/
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider
 │       ├── ThinkPHP/                #   Service + Facade
+│       ├── Yii/                     #   Component + Bootstrap
+│       ├── Yii3/                    #   config-plugin（params + di）
 │       └── Webman/                  #   Plugin
 └── tests/
     ├── Unit/                        # 单元测试（逐客户端 / 传输 / 适配器 / 消息类）

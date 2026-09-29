@@ -25,7 +25,7 @@
   あなたの設定とリースを見守ります：切断すれば自分で再接続し、期限が切れれば自分で掃除します。
 </p>
 
-PHP etcd v3 クライアント —— デュアルモード転送（HTTP は全機能 / gRPC は単項 RPC）で、etcd v3 の全 API（KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock）をカバー。**Laravel / Hyperf / ThinkPHP / Webman** にすぐ対応します。
+PHP etcd v3 クライアント —— デュアルモード転送（HTTP は全機能 / gRPC は単項 RPC）で、etcd v3 の全 API（KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock）をカバー。**Laravel / Hyperf / ThinkPHP / Webman / Yii2 / Yii3** にすぐ対応します。
 
 ## 要件
 
@@ -517,6 +517,74 @@ $etcd->kv()->put('/key', 'value');
 
 設定をカスタマイズする場合は `plugin/erikwang2013/etcd/config/etcd.php` を編集します。
 
+### Yii2
+
+インストールするだけで使えます。アプリ設定にコンポーネントを登録すると、`extra.bootstrap` が `EtcdClient` を DI コンテナにバインドするので、コンストラクタインジェクションでもコンポーネントが持つのと同じインスタンスが渡ります（`--no-plugins` で導入した場合は `bootstrap` 配列に `Erikwang2013\Etcd\Adapter\Yii\Bootstrap::class` を追加してください）。
+
+```php
+// config/web.php
+return [
+    'components' => [
+        'etcd' => [
+            'class'   => Erikwang2013\Etcd\Adapter\Yii\Component::class,
+            'options' => [                          // 省略すると ETCD_* 環境変数を読みます
+                'endpoints' => ['10.0.0.1:2379'],
+                'timeout'   => 3.0,
+            ],
+        ],
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// コンポーネント方式
+Yii::$app->etcd->kv()->put('/key', 'value');
+$val = Yii::$app->etcd->kv()->get('/key');
+
+// 依存性注入方式
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
+### Yii3
+
+インストールするだけで使えます。パッケージの `config-plugin` 宣言を yiisoft/config が `params` と `di` グループにマージするので、`EtcdClient` がコンテナに入ります（yiisoft/di は共有インスタンスだけを保持するため、何度注入しても同じクライアントです）。
+
+```php
+// config/common/params.php — 省略すると config/etcd.php の既定値（ETCD_* 環境変数）を使います;
+// 書く場合はキーごと置き換わるので、必要なフィールドを全部書いてください
+return [
+    'erikwang2013/etcd' => [
+        'endpoints' => ['10.0.0.1:2379'],
+        'timeout'   => 3.0,
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// 任意の action / service — コンテナ注入だけで OK
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
 ## 例外処理
 
 ```php
@@ -544,7 +612,7 @@ try {
 
 ```
 erikwang2013/etcd/
-├── composer.json                    # パッケージ定義：PSR-4 自動読込 + Laravel / Hyperf 自動検出
+├── composer.json                    # パッケージ定義：PSR-4 自動読込 + Laravel / Hyperf / Yii2 / Yii3 自動検出
 ├── phpunit.xml.dist                 # PHPUnit 設定（unit / integration の 2 スイート）
 ├── protos/                          # etcd v3.5 上流 proto + 生成スクリプト + 生成物（gRPC 用）
 ├── .github/workflows/ci.yml         # マージ前ゲート：ユニット行列 / 構文ベースライン / 統合 / i18n ドキュメント
@@ -585,6 +653,8 @@ erikwang2013/etcd/
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider
 │       ├── ThinkPHP/                #   Service + Facade
+│       ├── Yii/                     #   Component + Bootstrap
+│       ├── Yii3/                    #   config-plugin (params + di)
 │       └── Webman/                  #   Plugin
 └── tests/
     ├── Unit/                        # 単体テスト（クライアント / 転送 / アダプタ / メッセージクラス別）

@@ -25,7 +25,7 @@
   তোমার কনফিগ আর লিজ পাহারা দেয়: কানেকশন গেলে নিজেই রিকানেক্ট, মেয়াদ শেষে নিজেই ক্লিনআপ।
 </p>
 
-PHP etcd v3 ক্লায়েন্ট —— দ্বৈত মোড ট্রান্সপোর্ট (HTTP পূর্ণ সুবিধা / gRPC ইউনারি RPC), etcd v3-এর সম্পূর্ণ API (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock) কভার করে, আর **Laravel / Hyperf / ThinkPHP / Webman**-এ আউট-অব-দ্য-বক্স চলে।
+PHP etcd v3 ক্লায়েন্ট —— দ্বৈত মোড ট্রান্সপোর্ট (HTTP পূর্ণ সুবিধা / gRPC ইউনারি RPC), etcd v3-এর সম্পূর্ণ API (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock) কভার করে, আর **Laravel / Hyperf / ThinkPHP / Webman / Yii2 / Yii3**-এ আউট-অব-দ্য-বক্স চলে।
 
 ## প্রয়োজনীয়তা
 
@@ -517,6 +517,74 @@ $etcd->kv()->put('/key', 'value');
 
 নিজস্ব কনফিগ দরকার হলে `plugin/erikwang2013/etcd/config/etcd.php` সম্পাদনা করুন।
 
+### Yii2
+
+ইনস্টল করলেই কাজ করে। অ্যাপ কনফিগে কম্পোনেন্টটি রেজিস্টার করুন: `extra.bootstrap` `EtcdClient`-কে DI কন্টেইনারে বাইন্ড করে, তাই কনস্ট্রাক্টর ইনজেকশনেও কম্পোনেন্টের রাখা একই ইনস্ট্যান্স পাওয়া যায় (`--no-plugins` দিয়ে ইনস্টল করলে `bootstrap` অ্যারেতে `Erikwang2013\Etcd\Adapter\Yii\Bootstrap::class` যোগ করুন)।
+
+```php
+// config/web.php
+return [
+    'components' => [
+        'etcd' => [
+            'class'   => Erikwang2013\Etcd\Adapter\Yii\Component::class,
+            'options' => [                          // বাদ দিলে ETCD_* এনভায়রনমেন্ট ভেরিয়েবল পড়া হয়
+                'endpoints' => ['10.0.0.1:2379'],
+                'timeout'   => 3.0,
+            ],
+        ],
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// কম্পোনেন্ট দিয়ে
+Yii::$app->etcd->kv()->put('/key', 'value');
+$val = Yii::$app->etcd->kv()->get('/key');
+
+// ডিপেন্ডেন্সি ইনজেকশন দিয়ে
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
+### Yii3
+
+ইনস্টল করলেই কাজ করে। yiisoft/config প্যাকেজের `config-plugin` ঘোষণাটি `params` ও `di` গ্রুপে মার্জ করে, ফলে `EtcdClient` কন্টেইনারে পাওয়া যায় (yiisoft/di শুধু শেয়ার্ড ইনস্ট্যান্স রাখে — যতবারই ইনজেক্ট করুন, একই ক্লায়েন্ট পাওয়া যায়)।
+
+```php
+// config/common/params.php — না দিলে config/etcd.php-এর ডিফল্ট (ETCD_* ভেরিয়েবল) ব্যবহৃত হয়;
+// লিখলে পুরো কী প্রতিস্থাপিত হয়, দরকারি সব ফিল্ড একসাথে লিখুন
+return [
+    'erikwang2013/etcd' => [
+        'endpoints' => ['10.0.0.1:2379'],
+        'timeout'   => 3.0,
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// যেকোনো action / service — কন্টেইনার ইনজেকশনই যথেষ্ট
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
 ## এক্সেপশন হ্যান্ডলিং
 
 ```php
@@ -544,7 +612,7 @@ try {
 
 ```
 erikwang2013/etcd/
-├── composer.json                    # প্যাকেজ ডেফিনিশন: PSR-4 অটোলোড + Laravel / Hyperf অটো-ডিসকভারি
+├── composer.json                    # প্যাকেজ ডেফিনিশন: PSR-4 অটোলোড + Laravel / Hyperf / Yii2 / Yii3 অটো-ডিসকভারি
 ├── phpunit.xml.dist                 # PHPUnit কনফিগ (unit / integration দুটি স্যুট)
 ├── protos/                          # etcd v3.5 আপস্ট্রিম proto + জেনারেশন স্ক্রিপ্ট + জেনারেট করা আউটপুট (gRPC-এর জন্য)
 ├── .github/workflows/ci.yml         # মার্জের আগে গেট: ইউনিট ম্যাট্রিক্স / সিনট্যাক্স বেসলাইন / ইন্টিগ্রেশন / i18n ডক্স
@@ -585,6 +653,8 @@ erikwang2013/etcd/
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider
 │       ├── ThinkPHP/                #   Service + Facade
+│       ├── Yii/                     #   Component + Bootstrap
+│       ├── Yii3/                    #   config-plugin (params + di)
 │       └── Webman/                  #   Plugin
 └── tests/
     ├── Unit/                        # ইউনিট টেস্ট (প্রতিটি ক্লায়েন্ট / ট্রান্সপোর্ট / অ্যাডাপ্টার / মেসেজ ক্লাস)

@@ -3,6 +3,8 @@
   "arch.app.laravel.sub": "ServiceProvider + Facade",
   "arch.app.thinkphp.sub": "Service + Facade",
   "arch.app.webman.sub": "Plugin::install()",
+  "arch.app.yii2.sub": "Component + Bootstrap",
+  "arch.app.yii3.sub": "config-plugin (params + di)",
   "arch.aside.1.b": "endpoints / transport / scheme / timeout / retry / auth; वरना ETCD_* env वेरिएबल।",
   "arch.aside.1.t": "कॉन्फ़िग व एनवायरनमेंट",
   "arch.aside.2.b": "EtcdClient::instance() — Webman जैसे बिना DI; resetInstance() — टेस्ट रीसेट।",

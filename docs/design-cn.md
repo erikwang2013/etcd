@@ -2,7 +2,7 @@
 
 ## 概述
 
-`erikwang2013/etcd` 是一个 PHP 8.1+ 的 etcd v3 客户端包，支持 gRPC + HTTP 双模传输，覆盖 etcd v3 全部 API，并提供 Laravel / Hyperf / ThinkPHP / Webman 四大框架的一等适配。
+`erikwang2013/etcd` 是一个 PHP 8.1+ 的 etcd v3 客户端包，支持 gRPC + HTTP 双模传输，覆盖 etcd v3 全部 API，并提供 Laravel / Hyperf / ThinkPHP / Webman / Yii2 / Yii3 六大框架的一等适配。
 
 ## 设计目标
 
@@ -267,6 +267,21 @@ RuntimeException
 - **使用：** `EtcdClient::instance()` 单例模式
 - **配置：** `plugin/erikwang2013/etcd/config/etcd.php`
 
+### Yii2
+
+- **入口：** `yii\base\Component` + `BootstrapInterface`
+- **发现：** composer.json `extra.bootstrap` 自动绑定 DI 容器（`--no-plugins` 时手动加进 `bootstrap` 数组）
+- **组件：** `'components' => ['etcd' => [..., 'options' => [...]]]`，`Yii::$app->etcd->kv()->put(...)`
+- **依赖注入：** `__construct(private EtcdClient $etcd)` 直接拿到该组件持有的客户端
+- **配置：** 组件 `options`；未给的键回落到 `config/etcd.php`（`ETCD_*` 环境变量）
+
+### Yii3
+
+- **入口：** 无类，只有 `src/Adapter/Yii3/config/` 两个配置文件
+- **发现：** composer.json `extra.config-plugin`（`source-directory` 指到该目录），yiisoft/config 插件把 `params.php` 并进 `params` 组、`di.php` 并进 `di` 组
+- **依赖注入：** `__construct(private EtcdClient $etcd)`；yiisoft/di 只保留共享实例，注入多次仍是同一个客户端
+- **配置：** 应用 `config/common/params.php` 里的 `erikwang2013/etcd` 键；该键整体替换（不会与默认值逐项合并），不写则用 `config/etcd.php`（`ETCD_*` 环境变量）
+
 ## 配置参考
 
 ```php
@@ -337,6 +352,8 @@ erikwang2013/etcd/
 │       ├── Laravel/
 │       ├── Hyperf/
 │       ├── ThinkPHP/
+│       ├── Yii/                       #   Component + Bootstrap
+│       ├── Yii3/                      #   config-plugin（params + di）
 │       └── Webman/
 ```
 

@@ -25,7 +25,7 @@
   penjaga konfigurasi dan lease Anda: putus, ia menyambung sendiri; kedaluwarsa, ia membersihkan sendiri.
 </p>
 
-Klien etcd v3 untuk PHP —— transport dua mode (HTTP fitur penuh / gRPC RPC unary), mencakup seluruh API etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock), siap pakai dengan **Laravel / Hyperf / ThinkPHP / Webman**.
+Klien etcd v3 untuk PHP —— transport dua mode (HTTP fitur penuh / gRPC RPC unary), mencakup seluruh API etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock), siap pakai dengan **Laravel / Hyperf / ThinkPHP / Webman / Yii2 / Yii3**.
 
 ## Persyaratan
 
@@ -517,6 +517,74 @@ $etcd->kv()->put('/key', 'value');
 
 Untuk konfigurasi khusus, sunting `plugin/erikwang2013/etcd/config/etcd.php`.
 
+### Yii2
+
+Langsung jalan setelah dipasang. Daftarkan komponen di konfigurasi aplikasi: `extra.bootstrap` mengikat `EtcdClient` ke kontainer DI, sehingga injeksi lewat konstruktor menerima instance yang sama dengan yang dipegang komponen (kalau dipasang dengan `--no-plugins`, tambahkan `Erikwang2013\Etcd\Adapter\Yii\Bootstrap::class` ke array `bootstrap`).
+
+```php
+// config/web.php
+return [
+    'components' => [
+        'etcd' => [
+            'class'   => Erikwang2013\Etcd\Adapter\Yii\Component::class,
+            'options' => [                          // kalau dihilangkan, dibaca dari env var ETCD_*
+                'endpoints' => ['10.0.0.1:2379'],
+                'timeout'   => 3.0,
+            ],
+        ],
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// lewat komponen
+Yii::$app->etcd->kv()->put('/key', 'value');
+$val = Yii::$app->etcd->kv()->get('/key');
+
+// lewat dependency injection
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
+### Yii3
+
+Langsung jalan setelah dipasang. yiisoft/config menggabungkan deklarasi `config-plugin` paket ke grup `params` dan `di`, jadi `EtcdClient` ada di kontainer (yiisoft/di hanya menyimpan instance bersama — berapa kali pun diinjeksi, kliennya sama).
+
+```php
+// config/common/params.php — kalau dihilangkan, pakai default config/etcd.php (env var ETCD_*);
+// kalau ditulis, seluruh key diganti — tulis semua field yang dipakai
+return [
+    'erikwang2013/etcd' => [
+        'endpoints' => ['10.0.0.1:2379'],
+        'timeout'   => 3.0,
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// action / service mana pun: cukup injeksi dari kontainer
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
 ## Penanganan Exception
 
 ```php
@@ -544,7 +612,7 @@ try {
 
 ```
 erikwang2013/etcd/
-├── composer.json                    # definisi paket: autoload PSR-4 + auto-discovery Laravel / Hyperf
+├── composer.json                    # definisi paket: autoload PSR-4 + auto-discovery Laravel / Hyperf / Yii2 / Yii3
 ├── phpunit.xml.dist                 # konfigurasi PHPUnit (dua suite: unit / integration)
 ├── protos/                          # proto upstream etcd v3.5 + skrip generate + keluaran hasil generate (untuk gRPC)
 ├── .github/workflows/ci.yml         # gate sebelum merge: matriks unit test / batas sintaks / integrasi / dokumen i18n
@@ -585,6 +653,8 @@ erikwang2013/etcd/
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider
 │       ├── ThinkPHP/                #   Service + Facade
+│       ├── Yii/                     #   Component + Bootstrap
+│       ├── Yii3/                    #   config-plugin (params + di)
 │       └── Webman/                  #   Plugin
 └── tests/
     ├── Unit/                        # unit test (per klien / transport / adapter / kelas pesan)

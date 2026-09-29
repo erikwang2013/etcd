@@ -25,7 +25,7 @@
   يحرس إعداداتك وعقودك: إن انقطع الاتصال أعاد الاتصال بنفسه، وإن انتهى العقد نظّف نفسه.
 </p>
 
-عميل etcd v3 للغة PHP —— نقل بوضعين (HTTP بكامل الميزات / gRPC لطلبات RPC الأحادية)، يغطي كامل واجهات etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock)، وجاهز للاستخدام مباشرة مع **Laravel / Hyperf / ThinkPHP / Webman**.
+عميل etcd v3 للغة PHP —— نقل بوضعين (HTTP بكامل الميزات / gRPC لطلبات RPC الأحادية)، يغطي كامل واجهات etcd v3 (KV / Watch / Lease / Auth / Cluster / Maintenance / Election / Lock)، وجاهز للاستخدام مباشرة مع **Laravel / Hyperf / ThinkPHP / Webman / Yii2 / Yii3**.
 
 ## المتطلبات
 
@@ -517,6 +517,74 @@ $etcd->kv()->put('/key', 'value');
 
 إذا احتجت إعدادًا مخصصًا، فحرّر `plugin/erikwang2013/etcd/config/etcd.php`.
 
+### Yii2
+
+يعمل فور التثبيت. سجّل المكوّن في إعدادات التطبيق: يربط `extra.bootstrap` الصنف `EtcdClient` بحاوية الحقن، فيحصل الحقن عبر المنشئ على النسخة نفسها التي يحتفظ بها المكوّن (إذا ثبّت بـ `--no-plugins` فأضف `Erikwang2013\Etcd\Adapter\Yii\Bootstrap::class` إلى مصفوفة `bootstrap`).
+
+```php
+// config/web.php
+return [
+    'components' => [
+        'etcd' => [
+            'class'   => Erikwang2013\Etcd\Adapter\Yii\Component::class,
+            'options' => [                          // عند حذفه تُقرأ متغيرات البيئة ETCD_*
+                'endpoints' => ['10.0.0.1:2379'],
+                'timeout'   => 3.0,
+            ],
+        ],
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// عبر المكوّن
+Yii::$app->etcd->kv()->put('/key', 'value');
+$val = Yii::$app->etcd->kv()->get('/key');
+
+// عبر حقن التبعية
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
+### Yii3
+
+يعمل فور التثبيت. يدمج yiisoft/config إعلان `config-plugin` الخاص بالحزمة في مجموعتَي `params` و`di`، فيصبح `EtcdClient` داخل الحاوية (يحتفظ yiisoft/di بالنسخ المشتركة فقط — فأي حقن يحصل على العميل نفسه).
+
+```php
+// config/common/params.php — إن حذفته تُستخدم قيم config/etcd.php الافتراضية (متغيرات ETCD_*);
+// وإن كتبته فيُستبدل المفتاح بالكامل، فاذكر كل الحقول التي تحتاجها
+return [
+    'erikwang2013/etcd' => [
+        'endpoints' => ['10.0.0.1:2379'],
+        'timeout'   => 3.0,
+    ],
+];
+```
+
+```php
+use Erikwang2013\Etcd\EtcdClient;
+
+// أي action / service: يكفي الحقن من الحاوية
+class MyService
+{
+    public function __construct(private EtcdClient $etcd) {}
+
+    public function work(): void
+    {
+        $this->etcd->kv()->put('/key', 'value');
+    }
+}
+```
+
 ## معالجة الاستثناءات
 
 ```php
@@ -544,7 +612,7 @@ try {
 
 ```
 erikwang2013/etcd/
-├── composer.json                    # تعريف الحزمة: تحميل تلقائي PSR-4 + اكتشاف تلقائي لـ Laravel / Hyperf
+├── composer.json                    # تعريف الحزمة: تحميل تلقائي PSR-4 + اكتشاف تلقائي لـ Laravel / Hyperf / Yii2 / Yii3
 ├── phpunit.xml.dist                 # إعداد PHPUnit (مجموعتا unit / integration)
 ├── protos/                          # proto المصدر من etcd v3.5 + سكربت التوليد + المخرجات المُولَّدة (لـgRPC)
 ├── .github/workflows/ci.yml         # بوابة قبل الدمج: مصفوفة unit / حدّ الصياغة / التكامل / توثيق i18n
@@ -585,6 +653,8 @@ erikwang2013/etcd/
 │       ├── Laravel/                 #   ServiceProvider + Facade
 │       ├── Hyperf/                  #   ConfigProvider
 │       ├── ThinkPHP/                #   Service + Facade
+│       ├── Yii/                     #   Component + Bootstrap
+│       ├── Yii3/                    #   config-plugin (params + di)
 │       └── Webman/                  #   Plugin
 └── tests/
     ├── Unit/                        # اختبارات وحدة (لكل عميل / نقل / محوّل / صنف رسالة)

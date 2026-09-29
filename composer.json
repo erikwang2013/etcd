@@ -1,6 +1,6 @@
 {
     "name": "erikwang2013/etcd",
-    "description": "PHP etcd v3 client over HTTP (full API) and gRPC (unary RPCs), covering KV, Watch, Lease, Auth, Cluster, Maintenance, Election and Lock. Runs on plain PHP: no framework, no PSR-18 implementation and no ext-curl required. Laravel, Hyperf, ThinkPHP and Webman adapters included.",
+    "description": "PHP etcd v3 client over HTTP (full API) and gRPC (unary RPCs), covering KV, Watch, Lease, Auth, Cluster, Maintenance, Election and Lock. Runs on plain PHP: no framework, no PSR-18 implementation and no ext-curl required. Laravel, Hyperf, ThinkPHP, Webman, Yii2 and Yii3 adapters included.",
     "type": "library",
     "license": "MIT",
     "authors": [
@@ -23,7 +23,10 @@
         "laravel",
         "hyperf",
         "thinkphp",
-        "webman"
+        "webman",
+        "yii",
+        "yii2",
+        "yii3"
     ],
     "require": {
         "php": ">=8.0"
@@ -41,7 +44,8 @@
         "ext-grpc": "Enables the gRPC transport (transport=grpc): unary RPCs over messages generated from etcd's protos. Without it that transport throws a ConnectionException on first use and the default HTTP transport is used instead.",
         "ext-protobuf": "Runtime for the generated protobuf messages the gRPC transport sends. google/protobuf ships the same classes if the extension cannot be installed.",
         "google/protobuf": "Same runtime as ext-protobuf, in pure PHP; install one of the two to use transport=grpc.",
-        "grpc/grpc": "Provides the Grpc\\BaseStub and Grpc\\Channel classes the gRPC transport extends; install it together with ext-grpc."
+        "grpc/grpc": "Provides the Grpc\\BaseStub and Grpc\\Channel classes the gRPC transport extends; install it together with ext-grpc.",
+        "yiisoft/config": "Yii3 apps: the plugin merges src/Adapter/Yii3/config into the params and di groups, so EtcdClient is injectable with no wiring."
     },
     "autoload": {
         "psr-4": {
@@ -65,6 +69,14 @@
         },
         "hyperf": {
             "config": "Erikwang2013\\Etcd\\Adapter\\Hyperf\\ConfigProvider"
+        },
+        "bootstrap": "Erikwang2013\\Etcd\\Adapter\\Yii\\Bootstrap",
+        "config-plugin-options": {
+            "source-directory": "src/Adapter/Yii3/config"
+        },
+        "config-plugin": {
+            "params": "params.php",
+            "di": "di.php"
         }
     }
 }
