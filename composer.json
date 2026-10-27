@@ -15,7 +15,7 @@
         "email": "erik@erik.xyz",
         "issues": "https://github.com/erikwang2013/etcd/issues"
     },
-    "homepage": "https://erik.xyz",
+    "homepage": "https://package.erik.xyz/etcd/",
     "keywords": [
         "etcd",
         "etcd-client",

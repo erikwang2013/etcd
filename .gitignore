@@ -12,3 +12,6 @@ ruvector.db
 # i18n tooling
 __pycache__/
 *.pyc
+
+# Generated static site, deployed separately
+/site/

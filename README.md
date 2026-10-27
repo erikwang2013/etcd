@@ -1,5 +1,7 @@
 # erikwang2013/etcd
 
+> 官网 / Website: [https://package.erik.xyz/etcd/](https://package.erik.xyz/etcd/)
+
 <p align="center">
   <b>简体中文</b> ·
   <a href="./docs/i18n/README.en.md">English</a> ·
